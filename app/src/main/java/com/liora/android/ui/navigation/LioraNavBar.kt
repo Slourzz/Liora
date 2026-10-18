@@ -9,7 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -70,6 +69,7 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
+import com.liora.android.ui.theme.isDark
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.hazeBlur
@@ -258,7 +258,7 @@ fun LiquidGlassNavBar(
     // así refracta los iconos sin mostrar el fondo "crudo".
     val selectorBackdrop = rememberCombinedBackdrop(barBackdrop, tabsBackdrop)
 
-    val darkMode = isSystemInDarkTheme()
+    val darkMode = MaterialTheme.colorScheme.isDark
     val surfaceColor = if (darkMode) {
         Color(0xFF121212).copy(alpha = 0.28f)
     } else {

@@ -62,6 +62,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liora.android.data.model.AudioFolder
+import com.liora.android.data.prefs.AppStyle
+import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.LioraSnackbarHost
@@ -79,7 +81,10 @@ private val SectionShape = RoundedCornerShape(24.dp)
 fun SettingsScreen(
     viewModel: MusicViewModel,
     liquidGlass: Boolean,
-    onLiquidGlassChange: (Boolean) -> Unit,
+    appStyle: AppStyle,
+    themeMode: AppThemeMode,
+    onAppStyleChange: (AppStyle) -> Unit,
+    onThemeModeChange: (AppThemeMode) -> Unit,
     backdrop: LayerBackdrop,
     hazeState: HazeState,
     bottomPadding: Dp,
@@ -92,6 +97,7 @@ fun SettingsScreen(
     var showIconPicker by remember { mutableStateOf(false) }
     var showFolderPicker by remember { mutableStateOf(false) }
     var showCacheDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     val folders by viewModel.folders.collectAsState()
     val excludedFolders by viewModel.excludedFolders.collectAsState()
@@ -107,12 +113,16 @@ fun SettingsScreen(
         }.getOrNull() ?: "1.0"
     }
 
-    BackHandler(enabled = showIconPicker || showFolderPicker || showCacheDialog) {
-        if (showCacheDialog) {
-            showCacheDialog = false
-        } else {
-            showIconPicker = false
-            showFolderPicker = false
+    BackHandler(
+        enabled = showIconPicker || showFolderPicker || showCacheDialog || showThemeDialog,
+    ) {
+        when {
+            showThemeDialog -> showThemeDialog = false
+            showCacheDialog -> showCacheDialog = false
+            else -> {
+                showIconPicker = false
+                showFolderPicker = false
+            }
         }
     }
 
@@ -156,9 +166,19 @@ fun SettingsScreen(
             } else {
                 PersonalizationSection(
                     iconStyle = selectedStyle,
-                    liquidGlass = liquidGlass,
-                    onLiquidGlassChange = onLiquidGlassChange,
                     onOpenIconPicker = { showIconPicker = true },
+                )
+
+                DesignSection(
+                    appStyle = appStyle,
+                    themeMode = themeMode,
+                    onAppStyleChange = { style ->
+                        onAppStyleChange(style)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Estilo: ${styleTitle(style)}")
+                        }
+                    },
+                    onOpenThemePicker = { showThemeDialog = true },
                 )
 
                 StorageSection(
@@ -243,14 +263,26 @@ fun SettingsScreen(
                 onDismiss = { showCacheDialog = false },
             )
         }
+
+        if (showThemeDialog) {
+            ThemeModeDialog(
+                current = themeMode,
+                onSelect = { mode ->
+                    onThemeModeChange(mode)
+                    showThemeDialog = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Tema: ${themeModeLabel(mode)}")
+                    }
+                },
+                onDismiss = { showThemeDialog = false },
+            )
+        }
     }
 }
 
 @Composable
 private fun PersonalizationSection(
     iconStyle: IconStyle,
-    liquidGlass: Boolean,
-    onLiquidGlassChange: (Boolean) -> Unit,
     onOpenIconPicker: () -> Unit,
 ) {
     SettingsSection(title = "Personalización") {
@@ -284,30 +316,83 @@ private fun PersonalizationSection(
                 .clip(SectionShape)
                 .clickable(onClick = onOpenIconPicker),
         )
+    }
+}
 
-        HorizontalDivider(
-            modifier = Modifier.padding(start = 16.dp),
-            color = MaterialTheme.colorScheme.outlineVariant,
-        )
+/**
+ * Sección "Diseño": el estilo visual de Liora (solo uno a la vez) y el modo de
+ * tema de la app.
+ */
+@Composable
+private fun DesignSection(
+    appStyle: AppStyle,
+    themeMode: AppThemeMode,
+    onAppStyleChange: (AppStyle) -> Unit,
+    onOpenThemePicker: () -> Unit,
+) {
+    SettingsSection(title = "Diseño") {
+        AppStyle.entries.forEach { style ->
+            ListItem(
+                headlineContent = { Text(styleTitle(style)) },
+                supportingContent = { Text(styleDescription(style)) },
+                trailingContent = {
+                    RadioButton(
+                        selected = style == appStyle,
+                        onClick = { onAppStyleChange(style) },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .clip(SectionShape)
+                    .clickable { onAppStyleChange(style) },
+            )
+
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 16.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
+        }
 
         ListItem(
-            headlineContent = { Text("Activar Liquid Glass") },
-            supportingContent = {
-                Text("Píldora flotante con refracción, reflejos y borde Fresnel. " +
-                    "Si lo desactivas, la navegación pasa a ser simple y translúcida.")
-            },
+            headlineContent = { Text("Tema de la app") },
+            supportingContent = { Text(themeModeLabel(themeMode)) },
             trailingContent = {
-                Switch(
-                    checked = liquidGlass,
-                    onCheckedChange = onLiquidGlassChange,
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier
                 .clip(SectionShape)
-                .clickable { onLiquidGlassChange(!liquidGlass) },
+                .clickable(onClick = onOpenThemePicker),
         )
     }
+}
+
+/** Nombre visible de cada estilo visual. */
+private fun styleTitle(style: AppStyle): String = when (style) {
+    AppStyle.Material -> "Material You"
+    AppStyle.Dynamic -> "Dinámico"
+    AppStyle.Glass -> "Glass"
+}
+
+/** Explicación corta de cada estilo visual. */
+private fun styleDescription(style: AppStyle): String = when (style) {
+    AppStyle.Material -> "El aspecto de siempre, con los colores del sistema."
+    AppStyle.Dynamic ->
+        "Toma los colores de la portada de la canción actual y los cambia " +
+            "con un degradado suave."
+    AppStyle.Glass ->
+        "Cristal líquido: navegación, barra de música y controles con refracción."
+}
+
+/** Nombre visible de cada modo de tema. */
+private fun themeModeLabel(mode: AppThemeMode): String = when (mode) {
+    AppThemeMode.System -> "Según el sistema"
+    AppThemeMode.Light -> "Claro"
+    AppThemeMode.Dark -> "Oscuro"
 }
 
 @Composable
@@ -542,6 +627,52 @@ private fun CacheSizeDialog(
                         )
                         Text(
                             text = LioraPrefs.cacheSizeLabel(mb),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Listo") }
+        },
+    )
+}
+
+/** Selector del modo de tema: según el sistema, claro u oscuro. */
+@Composable
+private fun ThemeModeDialog(
+    current: AppThemeMode,
+    onSelect: (AppThemeMode) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tema de la app") },
+        text = {
+            Column {
+                Text(
+                    text = "Elige si Liora sigue el modo del teléfono o si se ve " +
+                        "siempre clara u oscura.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                AppThemeMode.entries.forEach { mode ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 2.dp),
+                    ) {
+                        RadioButton(
+                            selected = mode == current,
+                            onClick = { onSelect(mode) },
+                        )
+                        Text(
+                            text = themeModeLabel(mode),
                             style = MaterialTheme.typography.bodyLarge,
                         )
                     }

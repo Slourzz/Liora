@@ -1,15 +1,21 @@
 package com.liora.android.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 
 /**
  * Paleta de respaldo (rosa cálido de Liora) para dispositivos sin Material You
@@ -60,15 +66,19 @@ private val LioraLightColors = lightColorScheme(
  *
  * En Android 12 o superior toma los colores del fondo de pantalla del usuario
  * (Material You); en versiones anteriores usa la paleta rosa propia de la app.
+ *
+ * [colorSchemeOverride] permite sustituir toda la paleta, que es lo que usa el
+ * estilo Dinámico para pintar la app con los colores de la portada actual.
  */
 @Composable
 fun LioraTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    colorSchemeOverride: ColorScheme? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val colorScheme = when {
+    val colorScheme = colorSchemeOverride ?: when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
@@ -80,4 +90,30 @@ fun LioraTheme(
         colorScheme = colorScheme,
         content = content,
     )
+}
+
+/**
+ * Indica si el tema activo es oscuro mirando el brillo de la superficie.
+ *
+ * Sirve para reaccionar al modo elegido en Ajustes (claro, oscuro o sistema) y
+ * no solo al modo del teléfono, que es lo que responde `isSystemInDarkTheme`.
+ */
+val ColorScheme.isDark: Boolean
+    get() = surface.luminance() < 0.5f
+
+/**
+ * Pinta los iconos de las barras del sistema (estado y navegación) en claro u
+ * oscuro, para que sigan al tema elegido dentro de la app.
+ */
+@Composable
+fun LioraSystemBars(darkTheme: Boolean) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
 }

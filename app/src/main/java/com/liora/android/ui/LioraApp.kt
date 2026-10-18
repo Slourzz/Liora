@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
@@ -33,6 +34,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.liora.android.data.prefs.AppStyle
+import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.ui.components.MiniPlayer
 import com.liora.android.ui.components.MiniPlayerCollapsedHeight
@@ -52,6 +55,8 @@ import com.liora.android.ui.screens.HomeScreen
 import com.liora.android.ui.screens.LibraryScreen
 import com.liora.android.ui.screens.SearchScreen
 import com.liora.android.ui.screens.SettingsScreen
+import com.liora.android.ui.theme.LioraSystemBars
+import com.liora.android.ui.theme.LioraTheme
 import com.liora.android.ui.viewmodel.MusicViewModel
 import dev.chrisbanes.haze.rememberHazeState
 
@@ -71,14 +76,8 @@ private val BottomAreaWithPlayerHeight = 152.dp + BottomAreaGap
 private val SimpleBottomAreaWithPlayerHeight = MiniPlayerHeight + SimpleNavBarHeight
 
 /**
- * Cáscara de la app: contenido + mini reproductor + navegación inferior.
- *
- * El contenido se dibuja por debajo de las barras y se copia al backdrop
- * (cristal líquido) o se registra para Haze (modo simple).
- *
- * El área inferior es adaptativa, igual que en Cloud: al bajar por la lista el
- * mini reproductor se comprime y baja, y la píldora de navegación se convierte
- * en un círculo, de modo que ambas barras terminan fusionadas en una sola fila.
+ * Punto de entrada de la interfaz: lee el estilo y el modo de tema elegidos en
+ * Ajustes, aplica el tema a toda la app y monta la cáscara.
  */
 @Composable
 fun LioraApp(
@@ -89,7 +88,60 @@ fun LioraApp(
     val context = LocalContext.current
     val prefs = remember { LioraPrefs(context) }
 
-    var liquidGlass by remember { mutableStateOf(prefs.liquidGlass) }
+    var appStyle by remember { mutableStateOf(prefs.appStyle) }
+    var themeMode by remember { mutableStateOf(prefs.appThemeMode) }
+
+    val darkTheme = when (themeMode) {
+        AppThemeMode.System -> isSystemInDarkTheme()
+        AppThemeMode.Light -> false
+        AppThemeMode.Dark -> true
+    }
+
+    LioraTheme(darkTheme = darkTheme) {
+        // Las barras del sistema siguen al modo elegido dentro de la app.
+        LioraSystemBars(darkTheme = darkTheme)
+
+        LioraAppContent(
+            viewModel = viewModel,
+            hasPermission = hasPermission,
+            onRequestPermissions = onRequestPermissions,
+            appStyle = appStyle,
+            themeMode = themeMode,
+            onAppStyleChange = { style ->
+                appStyle = style
+                prefs.appStyle = style
+            },
+            onThemeModeChange = { mode ->
+                themeMode = mode
+                prefs.appThemeMode = mode
+            },
+        )
+    }
+}
+
+/**
+ * Cáscara de la app: contenido + mini reproductor + navegación inferior.
+ *
+ * El contenido se dibuja por debajo de las barras y se copia al backdrop
+ * (cristal líquido) o se registra para Haze (modo simple).
+ *
+ * El área inferior es adaptativa, igual que en Cloud: al bajar por la lista el
+ * mini reproductor se comprime y baja, y la píldora de navegación se convierte
+ * en un círculo, de modo que ambas barras terminan fusionadas en una sola fila.
+ */
+@Composable
+private fun LioraAppContent(
+    viewModel: MusicViewModel,
+    hasPermission: Boolean,
+    onRequestPermissions: () -> Unit,
+    appStyle: AppStyle,
+    themeMode: AppThemeMode,
+    onAppStyleChange: (AppStyle) -> Unit,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+) {
+    // Solo el estilo Glass usa el cristal líquido; Material You y Dinámico se
+    // quedan con la navegación simple.
+    val liquidGlass = appStyle == AppStyle.Glass
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -167,10 +219,10 @@ fun LioraApp(
                 LioraTab.Settings -> SettingsScreen(
                     viewModel = viewModel,
                     liquidGlass = liquidGlass,
-                    onLiquidGlassChange = { enabled ->
-                        liquidGlass = enabled
-                        prefs.liquidGlass = enabled
-                    },
+                    appStyle = appStyle,
+                    themeMode = themeMode,
+                    onAppStyleChange = onAppStyleChange,
+                    onThemeModeChange = onThemeModeChange,
                     backdrop = backdrop,
                     hazeState = hazeState,
                     bottomPadding = bottomPadding,

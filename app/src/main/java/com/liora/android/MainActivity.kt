@@ -15,7 +15,6 @@ import com.liora.android.data.cache.PlaybackCache
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.ui.LioraApp
-import com.liora.android.ui.theme.LioraTheme
 import com.liora.android.ui.viewmodel.MusicViewModel
 
 class MainActivity : ComponentActivity() {
@@ -52,14 +51,12 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            LioraTheme {
-                val hasPermission by audioPermissionState
-                LioraApp(
-                    viewModel = viewModel,
-                    hasPermission = hasPermission,
-                    onRequestPermissions = { requestPermissions() },
-                )
-            }
+            val hasPermission by audioPermissionState
+            LioraApp(
+                viewModel = viewModel,
+                hasPermission = hasPermission,
+                onRequestPermissions = { requestPermissions() },
+            )
         }
     }
 

@@ -11,13 +11,31 @@ class LioraPrefs(context: Context) {
         .getSharedPreferences("liora_settings", Context.MODE_PRIVATE)
 
     /**
-     * Cuando está activo, la navegación usa el cristal líquido (píldora con
-     * refracción y borde Fresnel, estilo Cloud). Si está apagado, se usa la
-     * navegación simple con desenfoque suave.
+     * Estilo visual de Liora: Material You, Dinámico (colores de la portada) o
+     * Glass (cristal líquido). Solo uno puede estar activo a la vez.
+     *
+     * El antiguo interruptor de Liquid Glass se migra aquí: quien lo tuviera
+     * activado pasa a [AppStyle.Glass] y quien no, a [AppStyle.Material].
      */
-    var liquidGlass: Boolean
-        get() = prefs.getBoolean(KEY_LIQUID_GLASS, true)
-        set(value) = prefs.edit().putBoolean(KEY_LIQUID_GLASS, value).apply()
+    var appStyle: AppStyle
+        get() {
+            val saved = prefs.getString(KEY_APP_STYLE, null)
+            AppStyle.entries.firstOrNull { it.name == saved }?.let { return it }
+            return if (prefs.getBoolean(KEY_LIQUID_GLASS, true)) {
+                AppStyle.Glass
+            } else {
+                AppStyle.Material
+            }
+        }
+        set(value) = prefs.edit().putString(KEY_APP_STYLE, value.name).apply()
+
+    /** Tema de la app: claro, oscuro o el que tenga el teléfono. */
+    var appThemeMode: AppThemeMode
+        get() {
+            val saved = prefs.getString(KEY_APP_THEME_MODE, null)
+            return AppThemeMode.entries.firstOrNull { it.name == saved } ?: AppThemeMode.System
+        }
+        set(value) = prefs.edit().putString(KEY_APP_THEME_MODE, value.name).apply()
 
     /**
      * Carpetas de audio que Liora no debe mostrar ni reproducir. Se guardan por
@@ -75,6 +93,10 @@ class LioraPrefs(context: Context) {
             else -> "$mb MB"
         }
 
+        private const val KEY_APP_STYLE = "app_style"
+        private const val KEY_APP_THEME_MODE = "app_theme_mode"
+
+        /** Clave del antiguo interruptor; se lee solo para migrar el estilo. */
         private const val KEY_LIQUID_GLASS = "liquid_glass"
         private const val KEY_EXCLUDED_FOLDERS = "excluded_folders"
         private const val KEY_CACHE_MAX_MB = "cache_max_mb"
@@ -85,3 +107,17 @@ class LioraPrefs(context: Context) {
         private const val KEY_LAST_PLAYING = "last_playing"
     }
 }
+
+/**
+ * Estilo visual de Liora. Los tres son excluyentes: activar uno apaga el otro.
+ *
+ * - [Material]: el aspecto de siempre, con los colores del sistema (Material You).
+ * - [Dynamic]: los colores salen de la portada de la canción actual, y cambian
+ *   con un degradado suave al pasar de una canción a otra.
+ * - [Glass]: cristal líquido con refracción real (Backdrop): navegación, barra
+ *   de música y controles de cristal.
+ */
+enum class AppStyle { Material, Dynamic, Glass }
+
+/** Modo de tema elegido por quien usa la app. */
+enum class AppThemeMode { System, Light, Dark }

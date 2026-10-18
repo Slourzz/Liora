@@ -8,7 +8,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -59,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.liora.android.data.model.Song
+import com.liora.android.ui.theme.isDark
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -136,7 +136,9 @@ fun MiniPlayer(
     val simpleBar = !liquidGlass
     val barShape = if (simpleBar) SimplePlayerShape else MiniPlayerShape
 
-    val darkMode = isSystemInDarkTheme()
+    // El resplandor de la barra sigue al tema activo de la app, no al modo del
+    // teléfono: con el tema forzado a claro u oscuro cambia igual.
+    val darkMode = MaterialTheme.colorScheme.isDark
     val surfaceTint = if (darkMode) {
         Color(0xFF121212).copy(alpha = 0.24f)
     } else {

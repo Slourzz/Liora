@@ -2,7 +2,6 @@ package com.liora.android.ui.screens
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,6 +50,7 @@ import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.SongRow
 import com.liora.android.ui.components.glassSource
 import com.liora.android.ui.components.lioraGlass
+import com.liora.android.ui.theme.isDark
 import com.liora.android.ui.viewmodel.MusicViewModel
 import com.liora.android.ui.viewmodel.UiState
 import dev.chrisbanes.haze.HazeState
@@ -189,7 +189,7 @@ private fun SearchField(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val fieldTint = if (isSystemInDarkTheme()) {
+    val fieldTint = if (MaterialTheme.colorScheme.isDark) {
         Color(0xFF121212).copy(alpha = 0.24f)
     } else {
         Color(0xFFFAFAFA).copy(alpha = 0.34f)
