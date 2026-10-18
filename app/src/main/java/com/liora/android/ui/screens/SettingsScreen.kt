@@ -98,6 +98,7 @@ fun SettingsScreen(
     val isScanning by viewModel.isScanning.collectAsState()
     val cacheMaxMb by viewModel.cacheMaxMb.collectAsState()
     val cacheBytes by viewModel.cacheBytes.collectAsState()
+    val filterSystemSounds by viewModel.filterSystemSounds.collectAsState()
 
     val versionName = remember {
         runCatching {
@@ -163,10 +164,12 @@ fun SettingsScreen(
                 StorageSection(
                     activeFolders = folders.count { it.path !in excludedFolders },
                     totalFolders = folders.size,
+                    filterSystemSounds = filterSystemSounds,
                     cacheUsageLabel = Formatter.formatShortFileSize(context, cacheBytes),
                     cacheMaxMb = cacheMaxMb,
                     isScanning = isScanning,
                     onOpenFolderPicker = { showFolderPicker = true },
+                    onFilterSystemSoundsChange = viewModel::setFilterSystemSounds,
                     onRescan = {
                         viewModel.rescanSongs { folderCount, songCount ->
                             scope.launch {
@@ -311,10 +314,12 @@ private fun PersonalizationSection(
 private fun StorageSection(
     activeFolders: Int,
     totalFolders: Int,
+    filterSystemSounds: Boolean,
     cacheUsageLabel: String,
     cacheMaxMb: Int,
     isScanning: Boolean,
     onOpenFolderPicker: () -> Unit,
+    onFilterSystemSoundsChange: (Boolean) -> Unit,
     onRescan: () -> Unit,
     onOpenCachePicker: () -> Unit,
 ) {
@@ -341,6 +346,31 @@ private fun StorageSection(
             modifier = Modifier
                 .clip(SectionShape)
                 .clickable(onClick = onOpenFolderPicker),
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+
+        ListItem(
+            headlineContent = { Text("Filtrar sonidos del sistema") },
+            supportingContent = {
+                Text(
+                    "Oculta alarmas, timbres y avisos del teléfono que se cuelan " +
+                        "en la biblioteca.",
+                )
+            },
+            trailingContent = {
+                Switch(
+                    checked = filterSystemSounds,
+                    onCheckedChange = onFilterSystemSoundsChange,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable { onFilterSystemSoundsChange(!filterSystemSounds) },
         )
 
         HorizontalDivider(

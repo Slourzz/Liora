@@ -28,6 +28,14 @@ class LioraPrefs(context: Context) {
         set(value) = prefs.edit().putStringSet(KEY_EXCLUDED_FOLDERS, value).apply()
 
     /**
+     * Cuando está activo, Liora oculta los sonidos del sistema (alarmas,
+     * timbres y avisos) que se cuelan en la biblioteca del teléfono.
+     */
+    var filterSystemSounds: Boolean
+        get() = prefs.getBoolean(KEY_FILTER_SYSTEM_SOUNDS, true)
+        set(value) = prefs.edit().putBoolean(KEY_FILTER_SYSTEM_SOUNDS, value).apply()
+
+    /**
      * Tamaño máximo de la caché de reproducción en MB. 0 la desactiva; al bajar
      * el límite se borran primero los archivos más viejos.
      */
@@ -71,6 +79,7 @@ class LioraPrefs(context: Context) {
         private const val KEY_EXCLUDED_FOLDERS = "excluded_folders"
         private const val KEY_CACHE_MAX_MB = "cache_max_mb"
         private const val DEFAULT_CACHE_MB = 500
+        private const val KEY_FILTER_SYSTEM_SOUNDS = "filter_system_sounds"
         private const val KEY_LAST_SONG_ID = "last_song_id"
         private const val KEY_LAST_POSITION_MS = "last_position_ms"
         private const val KEY_LAST_PLAYING = "last_playing"

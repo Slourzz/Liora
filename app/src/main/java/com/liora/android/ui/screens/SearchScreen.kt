@@ -144,7 +144,7 @@ fun SearchScreen(
                         SongRow(
                             song = song,
                             onClick = { viewModel.playSong(song) },
-                            subtitle = "${song.artist} • ${song.album}",
+                            subtitle = song.subtitle,
                             isCurrent = song.id == currentSong?.id,
                             isPlaying = isPlaying,
                         )

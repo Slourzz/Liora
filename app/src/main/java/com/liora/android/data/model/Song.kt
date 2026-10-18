@@ -12,4 +12,13 @@ data class Song(
     val albumArtUri: Uri?,
     /** Carpeta que contiene el archivo; Ajustes la usa para excluirla. */
     val folder: String,
-)
+    /** Alarmas, timbres o avisos del teléfono; Ajustes puede ocultarlos. */
+    val systemSound: Boolean = false,
+) {
+
+    /** "Artista • Álbum" sin partes vacías, listo para los subtítulos. */
+    val subtitle: String
+        get() = listOf(artist, album)
+            .filter { it.isNotBlank() }
+            .joinToString(" • ")
+}

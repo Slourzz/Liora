@@ -65,6 +65,10 @@ class MusicViewModel(
     private val _excludedFolders = MutableStateFlow(prefs.excludedFolders)
     val excludedFolders: StateFlow<Set<String>> = _excludedFolders.asStateFlow()
 
+    /** Verdadero si Liora oculta los sonidos del sistema de la biblioteca. */
+    private val _filterSystemSounds = MutableStateFlow(prefs.filterSystemSounds)
+    val filterSystemSounds: StateFlow<Boolean> = _filterSystemSounds.asStateFlow()
+
     /** Verdadero mientras "Leer carpetas" está releyendo el teléfono. */
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
@@ -247,6 +251,13 @@ class MusicViewModel(
         publishSongs()
     }
 
+    /** Activa o desactiva el filtro de sonidos del sistema; queda guardado. */
+    fun setFilterSystemSounds(filter: Boolean) {
+        prefs.filterSystemSounds = filter
+        _filterSystemSounds.value = filter
+        publishSongs()
+    }
+
     /** Cambia el máximo de la caché de reproducción y la recorta al momento. */
     fun setCacheMaxMb(maxMb: Int) {
         prefs.cacheMaxMb = maxMb
@@ -257,11 +268,16 @@ class MusicViewModel(
         }
     }
 
-    /** Aplica las carpetas excluidas y publica canciones y carpetas. */
+    /** Aplica las carpetas excluidas y el filtro de sonidos, y publica todo. */
     private fun publishSongs() {
         val excluded = _excludedFolders.value
+        val filterSystem = _filterSystemSounds.value
         _folders.value = allSongs.toAudioFolders()
-        _uiState.value = UiState.Success(allSongs.filter { it.folder !in excluded })
+        _uiState.value = UiState.Success(
+            allSongs.filter { song ->
+                song.folder !in excluded && (!filterSystem || !song.systemSound)
+            },
+        )
         // La biblioteca ya está lista: si faltaba esto para volver a la última
         // sesión (controlador conectado antes que las canciones), se hace ya.
         restorePlaybackIfPossible()

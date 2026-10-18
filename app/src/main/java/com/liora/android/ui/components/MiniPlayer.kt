@@ -218,7 +218,7 @@ fun MiniPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = song.artist,
+                        text = song.artist.ifBlank { song.album },
                         fontSize = (12f - 1.5f * collapse).sp,
                         color = secondaryColor,
                         maxLines = 1,

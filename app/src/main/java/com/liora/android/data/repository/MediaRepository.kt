@@ -60,13 +60,22 @@ class MediaRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
                 val title = cursor.getString(titleColumn) ?: "Desconocido"
-                val artist = cursor.getString(artistColumn) ?: "Artista Desconocido"
-                val album = cursor.getString(albumColumn) ?: "Álbum Desconocido"
+                val rawArtist = cursor.getString(artistColumn).orEmpty()
                 val duration = cursor.getLong(durationColumn)
                 val albumId = cursor.getLong(albumIdColumn)
 
                 val path = if (dataColumn >= 0) cursor.getString(dataColumn).orEmpty() else ""
                 val folder = path.substringBeforeLast('/', "").ifEmpty { UnknownFolder }
+
+                // MediaStore devuelve "<unknown>" cuando falta el dato: el
+                // artista se deja vacío y el álbum cae al nombre de la carpeta.
+                val artist = if (rawArtist.equals(Anonymous, ignoreCase = true)) "" else rawArtist
+                val rawAlbum = cursor.getString(albumColumn).orEmpty()
+                val album = if (rawAlbum.equals(Anonymous, ignoreCase = true) || rawAlbum.isBlank()) {
+                    folder
+                } else {
+                    rawAlbum
+                }
 
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -78,15 +87,55 @@ class MediaRepository(private val context: Context) {
                 )
 
                 songList.add(
-                    Song(id, title, artist, album, duration, contentUri, albumArtUri, folder)
+                    Song(
+                        id = id,
+                        title = title,
+                        artist = artist,
+                        album = album,
+                        duration = duration,
+                        contentUri = contentUri,
+                        albumArtUri = albumArtUri,
+                        folder = folder,
+                        systemSound = looksLikeSystemSound(title, rawArtist),
+                    )
                 )
             }
         }
         songList
     }
 
+    /**
+     * Los packs de sonidos que se descargan al teléfono (los de MIUI, por
+     * ejemplo) vienen marcados como música y duran más de lo normal, así que
+     * se reconocen por el nombre; solo se descartan si además no hay un
+     * artista de verdad, para no ocultar canciones que se llamen parecido.
+     */
+    private fun looksLikeSystemSound(title: String, artist: String): Boolean {
+        val name = title.lowercase()
+        if (SystemSoundHints.none { name.contains(it) }) return false
+        val author = artist.lowercase()
+        return author.isBlank() ||
+            author == Anonymous ||
+            author.contains("xiaomi") ||
+            author.contains("miui")
+    }
+
     private companion object {
         /** Carpeta comodín cuando MediaStore no informa la ruta del archivo. */
         const val UnknownFolder = "Otras"
+
+        /** Valor que MediaStore devuelve cuando no hay metadatos. */
+        const val Anonymous = "<unknown>"
+
+        /** Pistas en el nombre que delatan sonidos del sistema. */
+        val SystemSoundHints = listOf(
+            "alarm",
+            "alarma",
+            "ringtone",
+            "timbre",
+            "notification",
+            "notificaci",
+            "miui",
+        )
     }
 }
