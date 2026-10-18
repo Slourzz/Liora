@@ -28,7 +28,15 @@ class MediaRepository(private val context: Context) {
             MediaStore.Audio.Media.ALBUM_ID
         )
 
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
+        // Excluye tonos de llamada, alarmas, notificaciones y sonidos del sistema,
+        // que en algunas ROM aparecen marcados como música (IS_MUSIC != 0).
+        val selection = buildString {
+            append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
+            append(" AND ${MediaStore.Audio.Media.IS_RINGTONE} = 0")
+            append(" AND ${MediaStore.Audio.Media.IS_ALARM} = 0")
+            append(" AND ${MediaStore.Audio.Media.IS_NOTIFICATION} = 0")
+            append(" AND ${MediaStore.Audio.Media.DURATION} >= 10000")
+        }
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         context.contentResolver.query(

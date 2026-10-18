@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -34,6 +35,9 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
+    /** Cola de reproducción actual, en el mismo orden que el reproductor. */
+    private var queue: List<Song> = emptyList()
+
     private var mediaController: MediaController? = null
 
     fun initializeMediaController(context: Context) {
@@ -45,7 +49,19 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
                     override fun onIsPlayingChanged(playing: Boolean) {
                         _isPlaying.value = playing
                     }
+
+                    /** Se dispara al cambiar de pista (automático o manual). */
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        _currentSong.value = songOf(mediaItem)
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED) {
+                            _isPlaying.value = false
+                        }
+                    }
                 })
+                _currentSong.value = songOf(currentMediaItem)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -62,11 +78,20 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
 
+    /**
+     * Reproduce [song] armando la cola con toda la lista visible, empezando por
+     * la canción elegida. Así funcionan "siguiente", "anterior" y el avance
+     * automático al terminar cada pista.
+     */
     fun playSong(song: Song) {
+        val songs = (_uiState.value as? UiState.Success)?.songs.orEmpty().ifEmpty { listOf(song) }
+        val startIndex = songs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+
+        queue = songs
         _currentSong.value = song
+
         mediaController?.let { controller ->
-            val mediaItem = MediaItem.fromUri(song.contentUri)
-            controller.setMediaItem(mediaItem)
+            controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, 0L)
             controller.prepare()
             controller.play()
         }
@@ -77,6 +102,41 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
             if (controller.isPlaying) controller.pause() else controller.play()
         }
     }
+
+    fun skipToNext() {
+        mediaController?.seekToNextMediaItem()
+    }
+
+    /** Reinicia la canción actual o salta a la anterior, como en los reproductores clásicos. */
+    fun skipToPrevious() {
+        mediaController?.seekToPrevious()
+    }
+
+    /** Convierte un MediaItem del reproductor de vuelta a su [Song] usando el mediaId. */
+    private fun songOf(mediaItem: MediaItem?): Song? {
+        val id = mediaItem?.mediaId?.toLongOrNull() ?: return null
+        return queue.firstOrNull { it.id == id }
+    }
+
+    /**
+     * Incluye los metadatos para que la notificación del servicio muestre
+     * título, artista, álbum y carátula en vez de "Unknown".
+     */
+    private fun Song.toMediaItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id.toString())
+            .setUri(contentUri)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setAlbumTitle(album)
+                    .setArtworkUri(albumArtUri)
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
 
     override fun onCleared() {
         super.onCleared()
