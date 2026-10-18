@@ -10,9 +10,14 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.MoreExecutors
+import com.liora.android.data.cache.PlaybackCache
+import com.liora.android.data.model.AudioFolder
 import com.liora.android.data.model.Song
+import com.liora.android.data.model.toAudioFolders
+import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.service.PlaybackService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,10 +46,42 @@ data class PlaybackProgress(
         }
 }
 
-class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
+class MusicViewModel(
+    private val repository: MediaRepository,
+    private val prefs: LioraPrefs,
+    private val cache: PlaybackCache,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /** Todas las canciones leídas, antes de aplicar las carpetas excluidas. */
+    private var allSongs: List<Song> = emptyList()
+
+    /** Carpetas con audio, para el selector de Ajustes. */
+    private val _folders = MutableStateFlow<List<AudioFolder>>(emptyList())
+    val folders: StateFlow<List<AudioFolder>> = _folders.asStateFlow()
+
+    private val _excludedFolders = MutableStateFlow(prefs.excludedFolders)
+    val excludedFolders: StateFlow<Set<String>> = _excludedFolders.asStateFlow()
+
+    /** Verdadero mientras "Leer carpetas" está releyendo el teléfono. */
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    private val _cacheMaxMb = MutableStateFlow(prefs.cacheMaxMb)
+    val cacheMaxMb: StateFlow<Int> = _cacheMaxMb.asStateFlow()
+
+    private val _cacheBytes = MutableStateFlow(0L)
+    val cacheBytes: StateFlow<Long> = _cacheBytes.asStateFlow()
+
+    init {
+        // Deja la caché dentro del límite elegido y calcula cuánto ocupa.
+        viewModelScope.launch(Dispatchers.IO) {
+            cache.trimTo(prefs.cacheMaxMb)
+            _cacheBytes.value = cache.usageBytes()
+        }
+    }
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
@@ -96,12 +133,60 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
         viewModelScope.launch {
             _uiState.value = UiState.Loading
             try {
-                val songs = repository.getLocalSongs()
-                _uiState.value = UiState.Success(songs)
+                allSongs = repository.getLocalSongs()
+                publishSongs()
             } catch (e: Exception) {
                 _uiState.value = UiState.Error(e.localizedMessage ?: "Error al cargar canciones")
             }
         }
+    }
+
+    /**
+     * Vuelve a leer el teléfono ("Leer carpetas"): aparecen los audios nuevos,
+     * se recalcula la lista de carpetas y se respetan las exclusiones guardadas.
+     * [onDone] recibe (carpetas, canciones visibles); -1 si la lectura falló.
+     */
+    fun rescanSongs(onDone: (Int, Int) -> Unit) {
+        if (_isScanning.value) return
+        viewModelScope.launch {
+            _isScanning.value = true
+            try {
+                allSongs = repository.getLocalSongs()
+                publishSongs()
+                onDone(_folders.value.size, (_uiState.value as? UiState.Success)?.songs?.size ?: 0)
+            } catch (e: Exception) {
+                onDone(-1, 0)
+            } finally {
+                _isScanning.value = false
+            }
+        }
+    }
+
+    /** Muestra u oculta una carpeta; la decisión queda guardada. */
+    fun setFolderExcluded(folder: String, excluded: Boolean) {
+        val updated = _excludedFolders.value.toMutableSet().apply {
+            if (excluded) add(folder) else remove(folder)
+        }
+        _excludedFolders.value = updated
+        prefs.excludedFolders = updated
+        publishSongs()
+    }
+
+    /** Cambia el máximo de la caché de reproducción y la recorta al momento. */
+    fun setCacheMaxMb(maxMb: Int) {
+        prefs.cacheMaxMb = maxMb
+        _cacheMaxMb.value = maxMb
+        viewModelScope.launch(Dispatchers.IO) {
+            cache.trimTo(maxMb)
+            _cacheBytes.value = cache.usageBytes()
+        }
+    }
+
+    /** Aplica las carpetas excluidas y publica canciones y carpetas. */
+    private fun publishSongs() {
+        val excluded = _excludedFolders.value
+        _folders.value = allSongs.toAudioFolders()
+        _uiState.value = UiState.Success(allSongs.filter { it.folder !in excluded })
     }
 
     /**

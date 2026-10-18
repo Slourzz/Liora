@@ -3,6 +3,7 @@ package com.liora.android.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -11,8 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -22,20 +25,26 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,10 +62,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liora.android.data.model.AudioFolder
+import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.glassSource
 import com.liora.android.ui.icons.IconStyle
 import com.liora.android.ui.icons.LauncherIconManager
+import com.liora.android.ui.viewmodel.MusicViewModel
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
 
@@ -65,6 +77,7 @@ private val SectionShape = RoundedCornerShape(24.dp)
 
 @Composable
 fun SettingsScreen(
+    viewModel: MusicViewModel,
     liquidGlass: Boolean,
     onLiquidGlassChange: (Boolean) -> Unit,
     backdrop: LayerBackdrop,
@@ -77,6 +90,14 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedStyle by remember { mutableStateOf(LauncherIconManager.currentStyle(context)) }
     var showIconPicker by remember { mutableStateOf(false) }
+    var showFolderPicker by remember { mutableStateOf(false) }
+    var showCacheDialog by remember { mutableStateOf(false) }
+
+    val folders by viewModel.folders.collectAsState()
+    val excludedFolders by viewModel.excludedFolders.collectAsState()
+    val isScanning by viewModel.isScanning.collectAsState()
+    val cacheMaxMb by viewModel.cacheMaxMb.collectAsState()
+    val cacheBytes by viewModel.cacheBytes.collectAsState()
 
     val versionName = remember {
         runCatching {
@@ -85,7 +106,14 @@ fun SettingsScreen(
         }.getOrNull() ?: "1.0"
     }
 
-    BackHandler(enabled = showIconPicker) { showIconPicker = false }
+    BackHandler(enabled = showIconPicker || showFolderPicker || showCacheDialog) {
+        if (showCacheDialog) {
+            showCacheDialog = false
+        } else {
+            showIconPicker = false
+            showFolderPicker = false
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -116,12 +144,43 @@ fun SettingsScreen(
                         }
                     },
                 )
+            } else if (showFolderPicker) {
+                FolderPicker(
+                    folders = folders,
+                    excludedFolders = excludedFolders,
+                    onToggle = { folder, excluded ->
+                        viewModel.setFolderExcluded(folder, excluded)
+                    },
+                )
             } else {
                 PersonalizationSection(
                     iconStyle = selectedStyle,
                     liquidGlass = liquidGlass,
                     onLiquidGlassChange = onLiquidGlassChange,
                     onOpenIconPicker = { showIconPicker = true },
+                )
+
+                StorageSection(
+                    activeFolders = folders.count { it.path !in excludedFolders },
+                    totalFolders = folders.size,
+                    cacheUsageLabel = Formatter.formatShortFileSize(context, cacheBytes),
+                    cacheMaxMb = cacheMaxMb,
+                    isScanning = isScanning,
+                    onOpenFolderPicker = { showFolderPicker = true },
+                    onRescan = {
+                        viewModel.rescanSongs { folderCount, songCount ->
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (folderCount < 0) {
+                                        "No se pudieron leer las carpetas"
+                                    } else {
+                                        "$folderCount carpetas · $songCount canciones"
+                                    }
+                                )
+                            }
+                        }
+                    },
+                    onOpenCachePicker = { showCacheDialog = true },
                 )
 
                 AboutSection(
@@ -132,13 +191,22 @@ fun SettingsScreen(
         }
 
         GlassTopBar(
-            title = if (showIconPicker) "Logo de la app" else "Ajustes",
+            title = when {
+                showIconPicker -> "Logo de la app"
+                showFolderPicker -> "Carpetas de audio"
+                else -> "Ajustes"
+            },
             liquidGlass = liquidGlass,
             backdrop = backdrop,
             hazeState = hazeState,
-            navigationIcon = if (showIconPicker) {
+            navigationIcon = if (showIconPicker || showFolderPicker) {
                 {
-                    IconButton(onClick = { showIconPicker = false }) {
+                    IconButton(
+                        onClick = {
+                            showIconPicker = false
+                            showFolderPicker = false
+                        },
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Volver",
@@ -157,6 +225,21 @@ fun SettingsScreen(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = bottomPadding),
         )
+
+        if (showCacheDialog) {
+            CacheSizeDialog(
+                currentMb = cacheMaxMb,
+                usageLabel = Formatter.formatShortFileSize(context, cacheBytes),
+                onSelect = { mb ->
+                    viewModel.setCacheMaxMb(mb)
+                    showCacheDialog = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Caché: ${LioraPrefs.cacheSizeLabel(mb)}")
+                    }
+                },
+                onDismiss = { showCacheDialog = false },
+            )
+        }
     }
 }
 
@@ -222,6 +305,223 @@ private fun PersonalizationSection(
                 .clickable { onLiquidGlassChange(!liquidGlass) },
         )
     }
+}
+
+@Composable
+private fun StorageSection(
+    activeFolders: Int,
+    totalFolders: Int,
+    cacheUsageLabel: String,
+    cacheMaxMb: Int,
+    isScanning: Boolean,
+    onOpenFolderPicker: () -> Unit,
+    onRescan: () -> Unit,
+    onOpenCachePicker: () -> Unit,
+) {
+    SettingsSection(title = "Almacenamiento") {
+        ListItem(
+            headlineContent = { Text("Excluir carpetas de audio") },
+            supportingContent = {
+                Text(
+                    if (totalFolders == 0) {
+                        "Todavía no hay carpetas leídas"
+                    } else {
+                        "$activeFolders de $totalFolders carpetas activas"
+                    },
+                )
+            },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(onClick = onOpenFolderPicker),
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+
+        ListItem(
+            headlineContent = { Text("Leer carpetas") },
+            supportingContent = {
+                Text(
+                    "Vuelve a leer el teléfono: encuentra audios nuevos y " +
+                        "respeta las carpetas excluidas.",
+                )
+            },
+            trailingContent = {
+                if (isScanning) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(22.dp),
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(enabled = !isScanning, onClick = onRescan),
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+
+        ListItem(
+            headlineContent = { Text("Caché de reproducción") },
+            supportingContent = {
+                Text(
+                    "Actualmente $cacheUsageLabel · " +
+                        "Máximo ${LioraPrefs.cacheSizeLabel(cacheMaxMb)}",
+                )
+            },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(onClick = onOpenCachePicker),
+        )
+    }
+}
+
+/**
+ * Lista vertical de carpetas con audio. Cada interruptor decide si Liora la
+ * reproduce (y la muestra) o la deja fuera por completo.
+ */
+@Composable
+private fun FolderPicker(
+    folders: List<AudioFolder>,
+    excludedFolders: Set<String>,
+    onToggle: (String, Boolean) -> Unit,
+) {
+    Text(
+        text = "Elige qué carpetas puede reproducir Liora. Las que apagues no " +
+            "aparecen en las listas ni entran en la cola de reproducción.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
+    )
+
+    if (folders.isEmpty()) {
+        Text(
+            text = "Todavía no se encontraron carpetas con audio.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp),
+        )
+        return
+    }
+
+    val activeCount = folders.count { it.path !in excludedFolders }
+
+    SettingsSection(title = "$activeCount de ${folders.size} carpetas activas") {
+        folders.forEachIndexed { index, folder ->
+            val enabled = folder.path !in excludedFolders
+
+            ListItem(
+                headlineContent = { Text(folder.name) },
+                supportingContent = {
+                    Text(
+                        text = "${folder.songCount} " +
+                            "${if (folder.songCount == 1) "canción" else "canciones"} · " +
+                            prettyPath(folder.path),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                trailingContent = {
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { checked -> onToggle(folder.path, !checked) },
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier
+                    .clip(SectionShape)
+                    .clickable { onToggle(folder.path, enabled) },
+            )
+
+            if (index != folders.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+        }
+    }
+}
+
+/** Resumen corto de una ruta larga: "…/emulated/0/Download". */
+private fun prettyPath(path: String): String {
+    val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
+    return if (parts.size <= 3) path else "…/" + parts.takeLast(3).joinToString("/")
+}
+
+/** Selector del tamaño máximo de la caché de reproducción. */
+@Composable
+private fun CacheSizeDialog(
+    currentMb: Int,
+    usageLabel: String,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Caché de reproducción") },
+        text = {
+            Column {
+                Text(
+                    text = "Máximo de espacio que Liora puede usar para copias " +
+                        "temporales de la música. Ahora mismo ocupa $usageLabel.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                LioraPrefs.CACHE_SIZES_MB.forEach { mb ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onSelect(mb) }
+                            .padding(vertical = 2.dp),
+                    ) {
+                        RadioButton(
+                            selected = mb == currentMb,
+                            onClick = { onSelect(mb) },
+                        )
+                        Text(
+                            text = LioraPrefs.cacheSizeLabel(mb),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Listo") }
+        },
+    )
 }
 
 @Composable

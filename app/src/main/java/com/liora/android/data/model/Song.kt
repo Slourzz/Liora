@@ -9,5 +9,7 @@ data class Song(
     val album: String,
     val duration: Long,
     val contentUri: Uri,
-    val albumArtUri: Uri?
+    val albumArtUri: Uri?,
+    /** Carpeta que contiene el archivo; Ajustes la usa para excluirla. */
+    val folder: String,
 )

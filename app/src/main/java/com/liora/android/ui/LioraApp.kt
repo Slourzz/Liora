@@ -164,6 +164,7 @@ fun LioraApp(
                 )
 
                 LioraTab.Settings -> SettingsScreen(
+                    viewModel = viewModel,
                     liquidGlass = liquidGlass,
                     onLiquidGlassChange = { enabled ->
                         liquidGlass = enabled

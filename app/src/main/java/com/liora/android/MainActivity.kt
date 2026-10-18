@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import com.liora.android.data.cache.PlaybackCache
+import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.ui.LioraApp
 import com.liora.android.ui.theme.LioraTheme
@@ -37,7 +39,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val repository = MediaRepository(applicationContext)
-        viewModel = MusicViewModel(repository)
+        viewModel = MusicViewModel(
+            repository = repository,
+            prefs = LioraPrefs(applicationContext),
+            cache = PlaybackCache(applicationContext),
+        )
         viewModel.initializeMediaController(this)
 
         audioPermissionState.value = checkAudioPermission()

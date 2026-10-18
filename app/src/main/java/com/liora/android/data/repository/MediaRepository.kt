@@ -25,7 +25,8 @@ class MediaRepository(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.ALBUM_ID
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATA,
         )
 
         // Excluye tonos de llamada, alarmas, notificaciones y sonidos del sistema,
@@ -52,6 +53,9 @@ class MediaRepository(private val context: Context) {
             val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
             val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+            // DATA está obsoleto pero sigue informando la ruta real del archivo,
+            // que es lo que necesitamos para agrupar y excluir carpetas.
+            val dataColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
@@ -60,6 +64,9 @@ class MediaRepository(private val context: Context) {
                 val album = cursor.getString(albumColumn) ?: "Álbum Desconocido"
                 val duration = cursor.getLong(durationColumn)
                 val albumId = cursor.getLong(albumIdColumn)
+
+                val path = if (dataColumn >= 0) cursor.getString(dataColumn).orEmpty() else ""
+                val folder = path.substringBeforeLast('/', "").ifEmpty { UnknownFolder }
 
                 val contentUri = ContentUris.withAppendedId(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -70,9 +77,16 @@ class MediaRepository(private val context: Context) {
                     albumId
                 )
 
-                songList.add(Song(id, title, artist, album, duration, contentUri, albumArtUri))
+                songList.add(
+                    Song(id, title, artist, album, duration, contentUri, albumArtUri, folder)
+                )
             }
         }
         songList
+    }
+
+    private companion object {
+        /** Carpeta comodín cuando MediaStore no informa la ruta del archivo. */
+        const val UnknownFolder = "Otras"
     }
 }
