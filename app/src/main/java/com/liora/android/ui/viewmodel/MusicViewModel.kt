@@ -100,33 +100,108 @@ class MusicViewModel(
 
     private var mediaController: MediaController? = null
 
+    /** Mientras no se haya intentado volver a la sesión anterior. */
+    private var restorePending = true
+
+    /** Evita guardar el estado a medias mientras se restaura la sesión. */
+    private var restoring = false
+
     fun initializeMediaController(context: Context) {
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
         controllerFuture.addListener({
-            mediaController = controllerFuture.get().apply {
-                addListener(object : Player.Listener {
-                    override fun onIsPlayingChanged(playing: Boolean) {
-                        _isPlaying.value = playing
-                    }
+            // El campo se asigna ANTES de usar el controlador: dentro del
+            // apply() todavía sería null y la restauración saldría sin hacer nada.
+            val controller = controllerFuture.get()
+            mediaController = controller
+            controller.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(playing: Boolean) {
+                    _isPlaying.value = playing
+                    // Pausa o reanudación: el momento exacto que interesa guardar.
+                    savePlaybackState()
+                }
 
-                    /** Se dispara al cambiar de pista (automático o manual). */
-                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        _currentSong.value = songOf(mediaItem)
-                        refreshProgress()
-                    }
+                /** Se dispara al cambiar de pista (automático o manual). */
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    _currentSong.value = songOf(mediaItem)
+                    refreshProgress()
+                    savePlaybackState()
+                }
 
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_ENDED) {
-                            _isPlaying.value = false
-                        }
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        _isPlaying.value = false
+                        savePlaybackState()
                     }
-                })
-                _currentSong.value = songOf(currentMediaItem)
-                refreshProgress()
-                startProgressTicker()
-            }
+                }
+            })
+            adoptRunningSession()
+            _currentSong.value = songOf(controller.currentMediaItem)
+            refreshProgress()
+            startProgressTicker()
+            restorePlaybackIfPossible()
         }, MoreExecutors.directExecutor())
+    }
+
+    /**
+     * Si el servicio ya venía sonando (la actividad se recreó pero el proceso
+     * sobrevivió), reconstruye la cola para que la interfaz sepa qué suena.
+     */
+    private fun adoptRunningSession() {
+        val controller = mediaController ?: return
+        if (queue.isNotEmpty() || controller.mediaItemCount == 0) return
+
+        queue = (0 until controller.mediaItemCount)
+            .mapNotNull { index -> songById(controller.getMediaItemAt(index).mediaId) }
+    }
+
+    /**
+     * Vuelve donde se quedó la última sesión: la misma canción, la misma
+     * posición y el mismo estado (si sonaba, sigue; si estaba en pausa,
+     * espera al usuario). Solo actúa una vez, con controlador y biblioteca
+     * listos, y nunca si ya hay algo cargado en el reproductor.
+     */
+    private fun restorePlaybackIfPossible() {
+        if (!restorePending) return
+        val controller = mediaController ?: return
+        val songs = (_uiState.value as? UiState.Success)?.songs.orEmpty()
+        if (songs.isEmpty()) return
+
+        restorePending = false
+
+        // Con música ya cargada (sesión viva o restaurada) no se toca nada.
+        if (controller.mediaItemCount > 0) return
+
+        val savedId = prefs.lastSongId
+        val song = songs.firstOrNull { it.id == savedId } ?: return
+        val startIndex = songs.indexOfFirst { it.id == savedId }.coerceAtLeast(0)
+
+        restoring = true
+        queue = songs
+        _currentSong.value = song
+        controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, prefs.lastPositionMs)
+        controller.prepare()
+        if (prefs.lastPlaying) controller.play()
+        restoring = false
+    }
+
+    /** Guarda canción, posición y estado para la próxima vez que se abra Liora. */
+    private fun savePlaybackState() {
+        if (restoring) return
+        val controller = mediaController ?: return
+        val id = controller.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        prefs.savePlayback(
+            songId = id,
+            positionMs = controller.currentPosition.coerceAtLeast(0L),
+            playing = controller.isPlaying,
+        )
+    }
+
+    /** Busca una canción por identificador en lo que hay cargado. */
+    private fun songById(mediaId: String?): Song? {
+        val id = mediaId?.toLongOrNull() ?: return null
+        return (_uiState.value as? UiState.Success)?.songs?.firstOrNull { it.id == id }
+            ?: allSongs.firstOrNull { it.id == id }
     }
 
     fun loadSongs() {
@@ -187,6 +262,9 @@ class MusicViewModel(
         val excluded = _excludedFolders.value
         _folders.value = allSongs.toAudioFolders()
         _uiState.value = UiState.Success(allSongs.filter { it.folder !in excluded })
+        // La biblioteca ya está lista: si faltaba esto para volver a la última
+        // sesión (controlador conectado antes que las canciones), se hace ya.
+        restorePlaybackIfPossible()
     }
 
     /**
@@ -240,9 +318,16 @@ class MusicViewModel(
     private fun startProgressTicker() {
         if (progressJob?.isActive == true) return
         progressJob = viewModelScope.launch {
+            var ticks = 0
             while (isActive) {
                 refreshProgress()
-                delay(if (mediaController?.isPlaying == true) 500L else 1500L)
+                val playing = mediaController?.isPlaying == true
+                // Cada 5 s de música se guarda el punto exacto por el que va.
+                if (playing && ++ticks >= 10) {
+                    ticks = 0
+                    savePlaybackState()
+                }
+                delay(if (playing) 500L else 1500L)
             }
         }
     }
@@ -275,6 +360,8 @@ class MusicViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        // Última oportunidad de dejar guardado dónde iba la música.
+        savePlaybackState()
         progressJob?.cancel()
         mediaController?.release()
     }
