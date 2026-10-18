@@ -40,7 +40,7 @@ enum class IconStyle(
     Outline(
         alias = "Outline",
         label = "Contorno",
-        description = "Trazo fino minimalista sobre crema",
+        description = "Trazo grueso minimalista sobre rosa melocotón",
         preview = R.drawable.ic_style_outline,
     ),
     Softblue(
