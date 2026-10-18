@@ -103,6 +103,7 @@ fun LioraApp(
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackProgress by viewModel.progress.collectAsState()
+    val neighbors by viewModel.neighbors.collectAsState()
 
     val collapseController = rememberBottomAreaCollapseController()
     val hasSong = currentSong != null
@@ -267,11 +268,14 @@ fun LioraApp(
             currentSong?.let { song ->
                 MiniPlayer(
                     song = song,
+                    previousSong = neighbors.previous,
+                    nextSong = neighbors.next,
                     isPlaying = isPlaying,
                     progressFraction = playbackProgress.fraction,
                     collapseProgress = collapse,
                     onTogglePlay = { viewModel.togglePlayPause() },
                     onPrevious = { viewModel.skipToPrevious() },
+                    onPreviousSong = { viewModel.skipToPreviousSong() },
                     onNext = { viewModel.skipToNext() },
                     liquidGlass = liquidGlass,
                     backdrop = backdrop,

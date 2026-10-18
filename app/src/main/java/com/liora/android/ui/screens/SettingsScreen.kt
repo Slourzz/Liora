@@ -37,7 +37,6 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -65,6 +64,7 @@ import com.kyant.backdrop.backdrops.LayerBackdrop
 import com.liora.android.data.model.AudioFolder
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.ui.components.GlassTopBar
+import com.liora.android.ui.components.LioraSnackbarHost
 import com.liora.android.ui.components.glassSource
 import com.liora.android.ui.icons.IconStyle
 import com.liora.android.ui.icons.LauncherIconManager
@@ -222,7 +222,7 @@ fun SettingsScreen(
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
-        SnackbarHost(
+        LioraSnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)

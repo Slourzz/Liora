@@ -46,6 +46,12 @@ data class PlaybackProgress(
         }
 }
 
+/** Pistas vecinas en la cola, para la vista previa al deslizar el mini reproductor. */
+data class QueueNeighbors(
+    val previous: Song? = null,
+    val next: Song? = null,
+)
+
 class MusicViewModel(
     private val repository: MediaRepository,
     private val prefs: LioraPrefs,
@@ -100,6 +106,10 @@ class MusicViewModel(
     private val _progress = MutableStateFlow(PlaybackProgress())
     val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
 
+    /** Canciones vecinas en la cola; el mini reproductor las asoma al deslizar. */
+    private val _neighbors = MutableStateFlow(QueueNeighbors())
+    val neighbors: StateFlow<QueueNeighbors> = _neighbors.asStateFlow()
+
     private var progressJob: Job? = null
 
     private var mediaController: MediaController? = null
@@ -129,6 +139,7 @@ class MusicViewModel(
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     _currentSong.value = songOf(mediaItem)
                     refreshProgress()
+                    refreshNeighbors()
                     savePlaybackState()
                 }
 
@@ -142,6 +153,7 @@ class MusicViewModel(
             adoptRunningSession()
             _currentSong.value = songOf(controller.currentMediaItem)
             refreshProgress()
+            refreshNeighbors()
             startProgressTicker()
             restorePlaybackIfPossible()
         }, MoreExecutors.directExecutor())
@@ -187,6 +199,7 @@ class MusicViewModel(
         controller.prepare()
         if (prefs.lastPlaying) controller.play()
         restoring = false
+        refreshNeighbors()
     }
 
     /** Guarda canción, posición y estado para la próxima vez que se abra Liora. */
@@ -206,6 +219,27 @@ class MusicViewModel(
         val id = mediaId?.toLongOrNull() ?: return null
         return (_uiState.value as? UiState.Success)?.songs?.firstOrNull { it.id == id }
             ?: allSongs.firstOrNull { it.id == id }
+    }
+
+    /** Recalcula las canciones vecinas según la posición actual en el reproductor. */
+    private fun refreshNeighbors() {
+        val controller = mediaController
+        val index = controller?.currentMediaItemIndex ?: -1
+        if (controller == null || index < 0 || controller.mediaItemCount == 0) {
+            _neighbors.value = QueueNeighbors()
+            return
+        }
+        val previous = if (index - 1 >= 0) {
+            songOf(controller.getMediaItemAt(index - 1))
+        } else {
+            null
+        }
+        val next = if (index + 1 < controller.mediaItemCount) {
+            songOf(controller.getMediaItemAt(index + 1))
+        } else {
+            null
+        }
+        _neighbors.value = QueueNeighbors(previous = previous, next = next)
     }
 
     fun loadSongs() {
@@ -300,6 +334,7 @@ class MusicViewModel(
             controller.prepare()
             controller.play()
         }
+        refreshNeighbors()
     }
 
     fun togglePlayPause() {
@@ -315,6 +350,14 @@ class MusicViewModel(
     /** Reinicia la canción actual o salta a la anterior, como en los reproductores clásicos. */
     fun skipToPrevious() {
         mediaController?.seekToPrevious()
+    }
+
+    /**
+     * Salta a la canción anterior sin la heurística de reinicio; es lo que
+     * espera el gesto de deslizar hacia la derecha en el mini reproductor.
+     */
+    fun skipToPreviousSong() {
+        mediaController?.seekToPreviousMediaItem()
     }
 
     /** Lee posición y duración del controlador (operación barata). */
