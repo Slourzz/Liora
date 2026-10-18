@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
+    <!-- Internet: solo para buscar las portadas que falten (iTunes), con copia
+         local de 30 días. Sin conexión todo sigue funcionando. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Permisos para reproducción en segundo plano y notificación -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />

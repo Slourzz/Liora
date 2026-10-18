@@ -57,6 +57,7 @@ import com.liora.android.ui.screens.SearchScreen
 import com.liora.android.ui.screens.SettingsScreen
 import com.liora.android.ui.theme.LioraSystemBars
 import com.liora.android.ui.theme.LioraTheme
+import com.liora.android.ui.theme.rememberDynamicColorScheme
 import com.liora.android.ui.viewmodel.MusicViewModel
 import dev.chrisbanes.haze.rememberHazeState
 
@@ -91,13 +92,23 @@ fun LioraApp(
     var appStyle by remember { mutableStateOf(prefs.appStyle) }
     var themeMode by remember { mutableStateOf(prefs.appThemeMode) }
 
+    // La canción actual decide la paleta del estilo Dinámico.
+    val currentSong by viewModel.currentSong.collectAsState()
+
     val darkTheme = when (themeMode) {
         AppThemeMode.System -> isSystemInDarkTheme()
         AppThemeMode.Light -> false
         AppThemeMode.Dark -> true
     }
 
-    LioraTheme(darkTheme = darkTheme) {
+    // Solo el estilo Dinámico cambia la paleta entera por la de la portada.
+    val dynamicScheme = if (appStyle == AppStyle.Dynamic) {
+        rememberDynamicColorScheme(song = currentSong, darkTheme = darkTheme)
+    } else {
+        null
+    }
+
+    LioraTheme(darkTheme = darkTheme, colorSchemeOverride = dynamicScheme) {
         // Las barras del sistema siguen al modo elegido dentro de la app.
         LioraSystemBars(darkTheme = darkTheme)
 

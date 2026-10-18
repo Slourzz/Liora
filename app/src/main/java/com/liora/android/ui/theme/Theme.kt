@@ -1,6 +1,7 @@
 package com.liora.android.ui.theme
 
 import android.app.Activity
+import android.content.Context
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
@@ -78,18 +79,29 @@ fun LioraTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val colorScheme = colorSchemeOverride ?: when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> LioraDarkColors
-        else -> LioraLightColors
-    }
+    val colorScheme = colorSchemeOverride ?: lioraBaseScheme(context, darkTheme, dynamicColor)
 
     MaterialTheme(
         colorScheme = colorScheme,
         content = content,
     )
+}
+
+/**
+ * Paleta base de Liora: Material You del fondo de pantalla en Android 12 o
+ * superior, y la paleta rosa propia en versiones anteriores. El estilo Dinámico
+ * la usa como punto de partida cuando una portada no da un color útil.
+ */
+internal fun lioraBaseScheme(
+    context: Context,
+    darkTheme: Boolean,
+    dynamicColor: Boolean = true,
+): ColorScheme = when {
+    dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    }
+    darkTheme -> LioraDarkColors
+    else -> LioraLightColors
 }
 
 /**
