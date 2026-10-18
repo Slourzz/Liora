@@ -1,0 +1,26 @@
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures
+.externalNativeBuild
+.cxx
+/app/build/
+/app/release/
+*.apk
+*.aab
+
+# Config local de herramientas (Claude Code, etc.)
+.claude/settings.local.json
+
+# Logs de compilación
+gradle-build.log
+*.log
+
+# Firma de release (nunca subir)
+*.jks
+*.keystore
+keystore.properties
