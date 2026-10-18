@@ -13,18 +13,92 @@
     <application
         android:name=".LioraApplication"
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.LioraAndroid">
 
+        <!-- Actividad principal: ya no declara el filtro LAUNCHER,
+             ese lo aportan los alias de icono de abajo. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true" />
+
+        <!-- ================= Selector de icono =================
+             Cada alias es un acceso directo en el launcher con su
+             propio icono. Solo uno esta habilitado a la vez y la app
+             los conmuta con PackageManager.setComponentEnabledSetting.
+             ==================================================== -->
+        <activity-alias
+            android:name=".icon.Glass"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".icon.White"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_white"
+            android:roundIcon="@mipmap/ic_launcher_white_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".icon.Liora"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_liora"
+            android:roundIcon="@mipmap/ic_launcher_liora_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".icon.Outline"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_outline"
+            android:roundIcon="@mipmap/ic_launcher_outline_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".icon.Softblue"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_softblue"
+            android:roundIcon="@mipmap/ic_launcher_softblue_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- Servicio de Media3 para reproducción en segundo plano -->
         <service

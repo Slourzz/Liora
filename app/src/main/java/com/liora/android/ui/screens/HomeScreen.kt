@@ -8,6 +8,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,14 +26,27 @@ import com.liora.android.ui.viewmodel.UiState
 fun HomeScreen(
     viewModel: MusicViewModel,
     onRequestPermissions: () -> Unit,
-    hasPermission: Boolean
+    hasPermission: Boolean,
+    onOpenSettings: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Liora Music") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Liora Music") },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Ajustes"
+                        )
+                    }
+                }
+            )
+        },
         bottomBar = {
             currentSong?.let { song ->
                 Card(
@@ -60,10 +76,22 @@ fun HomeScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        IconButton(onClick = { viewModel.skipToPrevious() }) {
+                            Icon(
+                                Icons.Default.SkipPrevious,
+                                contentDescription = "Canción anterior"
+                            )
+                        }
                         IconButton(onClick = { viewModel.togglePlayPause() }) {
                             Icon(
                                 if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = null
+                                contentDescription = if (isPlaying) "Pausar" else "Reproducir"
+                            )
+                        }
+                        IconButton(onClick = { viewModel.skipToNext() }) {
+                            Icon(
+                                Icons.Default.SkipNext,
+                                contentDescription = "Canción siguiente"
                             )
                         }
                     }
