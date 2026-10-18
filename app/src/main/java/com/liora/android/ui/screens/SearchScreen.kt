@@ -1,0 +1,285 @@
+package com.liora.android.ui.screens
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.liora.android.ui.components.GlassTopBar
+import com.liora.android.ui.components.SongRow
+import com.liora.android.ui.components.glassSource
+import com.liora.android.ui.components.lioraGlass
+import com.liora.android.ui.viewmodel.MusicViewModel
+import com.liora.android.ui.viewmodel.UiState
+import dev.chrisbanes.haze.HazeState
+
+/** Texto de ayuda del campo vacío. */
+private const val SearchHint = "Canciones, artistas o álbumes"
+
+/** Deja sitio a la barra superior (estado + título). */
+private val SearchFieldTop = 96.dp
+
+/** Alto del campo de búsqueda. */
+private val SearchFieldHeight = 52.dp
+
+/** Lo que hay que bajar la lista para no quedar debajo del campo. */
+private val SearchContentTop = SearchFieldTop + SearchFieldHeight + 12.dp
+
+/**
+ * Pantalla de búsqueda: filtra la biblioteca por título, artista o álbum
+ * mientras se escribe.
+ *
+ * El campo de búsqueda es un cristal **fuera** de la capa de contenido (igual
+ * que la barra superior): si estuviera dentro se copiaría a sí mismo y el
+ * grafo de dibujo de Android se volvería cíclico.
+ */
+@Composable
+fun SearchScreen(
+    viewModel: MusicViewModel,
+    liquidGlass: Boolean,
+    backdrop: LayerBackdrop,
+    hazeState: HazeState,
+    bottomPadding: Dp,
+    collapseConnection: NestedScrollConnection,
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val currentSong by viewModel.currentSong.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+
+    var query by rememberSaveable { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    val songs = (uiState as? UiState.Success)?.songs.orEmpty()
+    val needle = query.trim()
+    val results = remember(needle, songs) {
+        if (needle.isEmpty()) {
+            emptyList()
+        } else {
+            songs.filter { song ->
+                song.title.contains(needle, ignoreCase = true) ||
+                    song.artist.contains(needle, ignoreCase = true) ||
+                    song.album.contains(needle, ignoreCase = true)
+            }
+        }
+    }
+
+    // El teclado aparece solo: entrar a buscar es querer escribir.
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .glassSource(liquidGlass = liquidGlass, backdrop = backdrop, hazeState = hazeState),
+        ) {
+            when {
+                uiState !is UiState.Success -> SearchMessage(
+                    title = "Todavía no podemos buscar",
+                    message = "Concede el permiso de audio y vuelve a intentarlo.",
+                )
+
+                needle.isEmpty() -> SearchMessage(
+                    title = "¿Qué quieres escuchar?",
+                    message = "Busca entre ${songs.size} canciones por título, artista o álbum.",
+                )
+
+                results.isEmpty() -> SearchMessage(
+                    title = "Sin resultados",
+                    message = "No hay nada que coincida con «$needle».",
+                )
+
+                else -> LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(collapseConnection),
+                    contentPadding = PaddingValues(top = SearchContentTop, bottom = bottomPadding),
+                ) {
+                    items(
+                        items = results,
+                        key = { it.id },
+                    ) { song ->
+                        SongRow(
+                            song = song,
+                            onClick = { viewModel.playSong(song) },
+                            subtitle = "${song.artist} • ${song.album}",
+                            isCurrent = song.id == currentSong?.id,
+                            isPlaying = isPlaying,
+                        )
+                    }
+                }
+            }
+        }
+
+        SearchField(
+            query = query,
+            onQueryChange = { query = it },
+            liquidGlass = liquidGlass,
+            backdrop = backdrop,
+            hazeState = hazeState,
+            focusRequester = focusRequester,
+            onSubmit = { keyboard?.hide() },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = SearchFieldTop, start = 16.dp, end = 16.dp)
+                .height(SearchFieldHeight),
+        )
+
+        GlassTopBar(
+            title = "Buscar",
+            liquidGlass = liquidGlass,
+            backdrop = backdrop,
+            hazeState = hazeState,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+    }
+}
+
+/** Campo de búsqueda de cristal: lupa, texto y botón para borrar. */
+@Composable
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    liquidGlass: Boolean,
+    backdrop: LayerBackdrop,
+    hazeState: HazeState,
+    focusRequester: FocusRequester,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val fieldTint = if (isSystemInDarkTheme()) {
+        Color(0xFF121212).copy(alpha = 0.24f)
+    } else {
+        Color(0xFFFAFAFA).copy(alpha = 0.34f)
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .lioraGlass(
+                liquidGlass = liquidGlass,
+                backdrop = backdrop,
+                hazeState = hazeState,
+                surfaceColor = fieldTint,
+                shape = RoundedCornerShape(26.dp),
+                showShadow = false,
+            )
+            .padding(horizontal = 16.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.Search,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Box(modifier = Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    text = SearchHint,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSubmit() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+            )
+        }
+
+        if (query.isNotEmpty()) {
+            Icon(
+                imageVector = Icons.Default.Clear,
+                contentDescription = "Borrar búsqueda",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onQueryChange("") },
+            )
+        }
+    }
+}
+
+/** Mensaje centrado para los estados sin lista (pista, sin resultados…). */
+@Composable
+private fun SearchMessage(
+    title: String,
+    message: String,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 32.dp, end = 32.dp, top = SearchContentTop),
+    ) {
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.weight(1.4f))
+    }
+}

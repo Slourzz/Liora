@@ -50,4 +50,12 @@ dependencies {
     // Jetpack Media3
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
+
+    // Haze (efectos de cristal / blur)
+    implementation(libs.haze)
+    implementation(libs.haze.blur)
+    implementation(libs.haze.blur.materials)
+
+    // Backdrop (cristal líquido con refracción real)
+    implementation(libs.backdrop)
 }

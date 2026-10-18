@@ -13,15 +13,32 @@ import com.google.common.util.concurrent.MoreExecutors
 import com.liora.android.data.model.Song
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.service.PlaybackService
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 sealed class UiState {
     object Loading : UiState()
     data class Success(val songs: List<Song>) : UiState()
     data class Error(val message: String) : UiState()
+}
+
+/** Estado de avance de la reproducción, para la línea de progreso del mini reproductor. */
+data class PlaybackProgress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+) {
+    /** Fracción 0..1 lista para dibujar. */
+    val fraction: Float
+        get() = if (durationMs > 0L) {
+            (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
 }
 
 class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
@@ -38,6 +55,12 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
     /** Cola de reproducción actual, en el mismo orden que el reproductor. */
     private var queue: List<Song> = emptyList()
 
+    /** Posición y duración de la pista actual, para la barra de progreso. */
+    private val _progress = MutableStateFlow(PlaybackProgress())
+    val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
+
+    private var progressJob: Job? = null
+
     private var mediaController: MediaController? = null
 
     fun initializeMediaController(context: Context) {
@@ -53,6 +76,7 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
                     /** Se dispara al cambiar de pista (automático o manual). */
                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                         _currentSong.value = songOf(mediaItem)
+                        refreshProgress()
                     }
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -62,6 +86,8 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
                     }
                 })
                 _currentSong.value = songOf(currentMediaItem)
+                refreshProgress()
+                startProgressTicker()
             }
         }, MoreExecutors.directExecutor())
     }
@@ -112,6 +138,30 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
         mediaController?.seekToPrevious()
     }
 
+    /** Lee posición y duración del controlador (operación barata). */
+    private fun refreshProgress() {
+        val controller = mediaController ?: return
+        _progress.value = PlaybackProgress(
+            positionMs = controller.currentPosition.coerceAtLeast(0L),
+            durationMs = controller.duration.coerceAtLeast(0L),
+        )
+    }
+
+    /**
+     * Sondea el avance dos veces por segundo mientras suena la música (y más
+     * despacio en pausa). Es suficiente para una línea de progreso de 2 dp y
+     * no cuesta prácticamente nada.
+     */
+    private fun startProgressTicker() {
+        if (progressJob?.isActive == true) return
+        progressJob = viewModelScope.launch {
+            while (isActive) {
+                refreshProgress()
+                delay(if (mediaController?.isPlaying == true) 500L else 1500L)
+            }
+        }
+    }
+
     /** Convierte un MediaItem del reproductor de vuelta a su [Song] usando el mediaId. */
     private fun songOf(mediaItem: MediaItem?): Song? {
         val id = mediaItem?.mediaId?.toLongOrNull() ?: return null
@@ -140,6 +190,7 @@ class MusicViewModel(private val repository: MediaRepository) : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
+        progressJob?.cancel()
         mediaController?.release()
     }
 }

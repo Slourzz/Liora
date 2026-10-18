@@ -6,24 +6,27 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.liora.android.data.repository.MediaRepository
-import com.liora.android.ui.screens.HomeScreen
-import com.liora.android.ui.screens.SettingsScreen
+import com.liora.android.ui.LioraApp
+import com.liora.android.ui.theme.LioraTheme
 import com.liora.android.ui.viewmodel.MusicViewModel
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: MusicViewModel
 
+    /** Se mantiene como estado de Compose para que la UI reaccione al conceder el permiso. */
+    private val audioPermissionState = mutableStateOf(false)
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
+        audioPermissionState.value = checkAudioPermission()
         if (permissions.values.any { it }) {
             viewModel.loadSongs()
         }
@@ -31,36 +34,40 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         val repository = MediaRepository(applicationContext)
         viewModel = MusicViewModel(repository)
         viewModel.initializeMediaController(this)
 
-        if (hasAudioPermission()) {
+        audioPermissionState.value = checkAudioPermission()
+        if (audioPermissionState.value) {
             viewModel.loadSongs()
         }
 
         setContent {
-            var showSettings by rememberSaveable { mutableStateOf(false) }
-
-            if (showSettings) {
-                SettingsScreen(onBack = { showSettings = false })
-            } else {
-                HomeScreen(
+            LioraTheme {
+                val hasPermission by audioPermissionState
+                LioraApp(
                     viewModel = viewModel,
+                    hasPermission = hasPermission,
                     onRequestPermissions = { requestPermissions() },
-                    hasPermission = hasAudioPermission(),
-                    onOpenSettings = { showSettings = true }
                 )
             }
         }
     }
 
-    private fun hasAudioPermission(): Boolean {
+    private fun checkAudioPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
         } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -68,9 +75,7 @@ class MainActivity : ComponentActivity() {
         val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-            }
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
