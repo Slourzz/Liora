@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -113,6 +114,10 @@ private val SimplePlayerShape = RoundedCornerShape(
  * Con [collapseProgress] > 0 (al bajar por la lista) todo el conjunto se
  * comprime: la barra pierde alto, la portada y el texto se achican y los
  * controles expandidos dejan paso a los compactos.
+ *
+ * [boundsModifier] y [artworkModifier] los prepara quien muestra el
+ * reproductor completo: la barra y su portada son las piezas que viajan hasta
+ * él cuando se toca (y las que reciben de vuelta al cerrar).
  */
 @Composable
 fun MiniPlayer(
@@ -126,10 +131,13 @@ fun MiniPlayer(
     onPrevious: () -> Unit,
     onPreviousSong: () -> Unit,
     onNext: () -> Unit,
+    onOpenPlayer: () -> Unit,
     liquidGlass: Boolean,
     backdrop: Backdrop,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
+    boundsModifier: Modifier = Modifier,
+    artworkModifier: Modifier = Modifier,
 ) {
     val collapse = collapseProgress.coerceIn(0f, 1f)
     val playerHeight = MiniPlayerHeight - MiniPlayerCollapsedDelta * collapse
@@ -225,6 +233,7 @@ fun MiniPlayer(
 
         val pillModifier = Modifier
             .fillMaxSize()
+            .then(boundsModifier)
             .then(if (simpleBar) Modifier.clip(barShape) else Modifier)
             .lioraGlass(
                 liquidGlass = liquidGlass,
@@ -248,7 +257,12 @@ fun MiniPlayer(
             )
 
         Box(
-            modifier = pillModifier.pointerInput(nextSong?.id, previousSong?.id, liquidGlass) {
+            modifier = pillModifier
+                // Un toque sobre la barra (sin deslizar) abre el reproductor.
+                .pointerInput(onOpenPlayer) {
+                    detectTapGestures(onTap = { onOpenPlayer() })
+                }
+                .pointerInput(nextSong?.id, previousSong?.id, liquidGlass) {
                 val velocityTracker = VelocityTracker()
 
                 fun settleBack() {
@@ -346,6 +360,7 @@ fun MiniPlayer(
                     song = song,
                     collapse = collapse,
                     translationX = { slide.value },
+                    artworkModifier = artworkModifier,
                 )
 
                 nextSong?.let { next ->
@@ -540,6 +555,7 @@ private fun MiniPlayerInfoRow(
     song: Song,
     collapse: Float,
     translationX: () -> Float,
+    artworkModifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -551,6 +567,7 @@ private fun MiniPlayerInfoRow(
             contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(44.dp - 10.dp * collapse)
+                .then(artworkModifier)
                 .clip(RoundedCornerShape(12.dp - 3.dp * collapse))
                 .background(
                     Brush.linearGradient(

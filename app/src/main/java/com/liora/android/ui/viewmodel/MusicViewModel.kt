@@ -111,6 +111,18 @@ class MusicViewModel(
     private val _neighbors = MutableStateFlow(QueueNeighbors())
     val neighbors: StateFlow<QueueNeighbors> = _neighbors.asStateFlow()
 
+    /** Cola completa tal como está cargada en el reproductor (panel "Cola"). */
+    private val _queueSongs = MutableStateFlow<List<Song>>(emptyList())
+    val queueSongs: StateFlow<List<Song>> = _queueSongs.asStateFlow()
+
+    /** Modo aleatorio del reproductor, espejo del controlador. */
+    private val _shuffleEnabled = MutableStateFlow(false)
+    val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
+
+    /** Modo de repetición del reproductor (Player.REPEAT_MODE_*). */
+    private val _repeatMode = MutableStateFlow(Player.REPEAT_MODE_OFF)
+    val repeatMode: StateFlow<Int> = _repeatMode.asStateFlow()
+
     private var progressJob: Job? = null
 
     private var mediaController: MediaController? = null
@@ -158,7 +170,17 @@ class MusicViewModel(
                         savePlaybackState()
                     }
                 }
+
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    _shuffleEnabled.value = shuffleModeEnabled
+                }
+
+                override fun onRepeatModeChanged(repeatMode: Int) {
+                    _repeatMode.value = repeatMode
+                }
             })
+            _shuffleEnabled.value = controller.shuffleModeEnabled
+            _repeatMode.value = controller.repeatMode
             adoptRunningSession()
             _currentSong.value = songOf(controller.currentMediaItem)
             refreshProgress()
@@ -178,6 +200,7 @@ class MusicViewModel(
 
         queue = (0 until controller.mediaItemCount)
             .mapNotNull { index -> songById(controller.getMediaItemAt(index).mediaId) }
+        _queueSongs.value = queue
     }
 
     /**
@@ -203,6 +226,7 @@ class MusicViewModel(
 
         restoring = true
         queue = songs
+        _queueSongs.value = queue
         _currentSong.value = song
         controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, prefs.lastPositionMs)
         controller.prepare()
@@ -336,6 +360,7 @@ class MusicViewModel(
         val startIndex = songs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
 
         queue = songs
+        _queueSongs.value = queue
         _currentSong.value = song
 
         mediaController?.let { controller ->
@@ -367,6 +392,32 @@ class MusicViewModel(
      */
     fun skipToPreviousSong() {
         mediaController?.seekToPreviousMediaItem()
+    }
+
+    /** Mueve la reproducción a [positionMs] dentro de la pista actual. */
+    fun seekTo(positionMs: Long) {
+        mediaController?.let { controller ->
+            controller.seekTo(positionMs.coerceAtLeast(0L))
+            refreshProgress()
+        }
+    }
+
+    /** Enciende o apaga el modo aleatorio. */
+    fun toggleShuffle() {
+        val controller = mediaController ?: return
+        controller.shuffleModeEnabled = !controller.shuffleModeEnabled
+        _shuffleEnabled.value = controller.shuffleModeEnabled
+    }
+
+    /** Rota el modo de repetición: apagado → todo → una → apagado. */
+    fun cycleRepeat() {
+        val controller = mediaController ?: return
+        controller.repeatMode = when (controller.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+        _repeatMode.value = controller.repeatMode
     }
 
     /** Lee posición y duración del controlador (operación barata). */

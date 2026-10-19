@@ -1,8 +1,16 @@
 package com.liora.android.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -15,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import com.liora.android.data.art.ArtworkRepository
 import com.liora.android.data.prefs.AppStyle
 import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
@@ -51,6 +61,10 @@ import com.liora.android.ui.navigation.LiquidNavBarPadding
 import com.liora.android.ui.navigation.SimpleNavBar
 import com.liora.android.ui.navigation.SimpleNavBarHeight
 import com.liora.android.ui.navigation.navBarSidePadding
+import com.liora.android.ui.player.LioraFullPlayer
+import com.liora.android.ui.player.LioraPlayerElement
+import com.liora.android.ui.player.PlayerMorphSpec
+import com.liora.android.ui.player.rememberPlayerMorphClip
 import com.liora.android.ui.screens.HomeScreen
 import com.liora.android.ui.screens.LibraryScreen
 import com.liora.android.ui.screens.SearchScreen
@@ -159,6 +173,9 @@ private fun LioraAppContent(
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
 
+    /** El reproductor completo se despliega al tocar el mini reproductor. */
+    var playerOpen by rememberSaveable { mutableStateOf(false) }
+
     val hazeState = rememberHazeState()
     val backgroundColor = MaterialTheme.colorScheme.background
     val backdrop = rememberLayerBackdrop {
@@ -170,10 +187,23 @@ private fun LioraAppContent(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackProgress by viewModel.progress.collectAsState()
     val neighbors by viewModel.neighbors.collectAsState()
+    val queueSongs by viewModel.queueSongs.collectAsState()
+    val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
+    val repeatMode by viewModel.repeatMode.collectAsState()
+
+    /** Esquinas que se desabrochan al abrir y cerrar el reproductor. */
+    val morphClip = rememberPlayerMorphClip()
 
     val collapseController = rememberBottomAreaCollapseController()
     val hasSong = currentSong != null
     SideEffect { collapseController.updateHasMiniPlayer(hasSong) }
+
+    // La paleta ambiental se prepara mientras la canción suena en el mini
+    // reproductor: así el reproductor completo nace ya con sus colores.
+    val context = LocalContext.current
+    LaunchedEffect(currentSong?.id) {
+        currentSong?.let { ArtworkRepository.atmosphereColors(context, it) }
+    }
 
     val tabs = LioraTab.entries
     val selectedTab = tabs[selectedIndex.coerceIn(0, tabs.lastIndex)]
@@ -245,121 +275,218 @@ private fun LioraAppContent(
             }
         }
 
-        BoxWithConstraints(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(
-                    if (liquidGlass) {
-                        if (hasSong) BottomAreaWithPlayerHeight else NavBarAreaHeight
-                    } else {
-                        // En modo simple el bloque es la suma de sus piezas (la
-                        // navegación ya incluye su inset de gestos).
-                        navigationBarInsets +
-                            if (hasSong) SimpleBottomAreaWithPlayerHeight else SimpleNavBarHeight
-                    },
-                ),
-        ) {
-            // Sigue al dedo mientras se hace scroll y se asienta con un muelle.
-            // El morph del área inferior es exclusivo del cristal líquido: en
-            // modo simple (Haze) las barras quedan pegadas y no se anima nada.
-            val collapseState = animateFloatAsState(
-                targetValue = if (hasSong && liquidGlass) collapseController.target else 0f,
-                animationSpec = if (collapseController.directManipulation) {
-                    snap()
-                } else {
-                    spring(
-                        dampingRatio = .82f,
-                        stiffness = 430f,
-                        visibilityThreshold = .001f,
-                    )
-                },
-                label = "colapso del area inferior",
-            )
-            val collapse = collapseState.value
-
-            val density = LocalDensity.current
-            // El círculo se centra en la franja de navegación, que va pegada al
-            // borde inferior con su inset de gestos: su centro queda a
-            // margen + media píldora + inset del borde de abajo. El mini
-            // reproductor tiene que caer en esa misma fila, así que baja
-            // (alto del área - centro de la franja - medio reproductor).
-            val navRowCenter =
-                LiquidNavBarPadding + LiquidNavBarHeight / 2 + navigationBarInsets
-            val collapseDrop = (
-                BottomAreaWithPlayerHeight - navRowCenter - MiniPlayerCollapsedHeight / 2
-                ).coerceAtLeast(0.dp)
-            // Al comprimirse, la navegación se abre hacia los bordes (con el
-            // mismo margen que usa la barra), así que el mini reproductor
-            // arranca donde termina el círculo y acaba donde empieza la
-            // búsqueda: los tres comparten fila y respiro.
-            val sideInset = if (liquidGlass) {
-                (
-                    navBarSidePadding(collapse) + LiquidNavBarCollapsedSize +
-                        LiquidNavBarCollapsedGap - MiniPlayerSidePadding
-                    ) * collapse
-            } else {
-                0.dp
-            }
-            val sideInsetPx = with(density) { sideInset.toPx() }
-            val collapseDropPx = with(density) {
-                (if (liquidGlass) collapseDrop else 0.dp).toPx()
-            }
-            val miniPlayerWidth = (maxWidth - sideInset * 2).coerceAtLeast(1.dp)
-
-            if (liquidGlass) {
-                LiquidGlassNavBar(
-                    selected = selectedTab,
-                    onSelect = onSelect,
-                    backdrop = backdrop,
-                    onSearchClick = { searchOpen = true },
-                    searchSelected = searchOpen,
-                    collapseProgress = collapse,
-                    onExpandBottomArea = collapseController::expand,
+        // El mini reproductor y el reproductor completo viven bajo el mismo
+        // lienzo de transiciones compartidas: la barra y su portada son las
+        // piezas que viajan de uno a otro.
+        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                BoxWithConstraints(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .zIndex(1f),
-                )
-            } else {
-                SimpleNavBar(
-                    selected = selectedTab,
-                    onSelect = onSelect,
-                    onSearchClick = { searchOpen = true },
-                    searchSelected = searchOpen,
-                    hazeState = hazeState,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
-            }
+                        .fillMaxWidth()
+                        .height(
+                            if (liquidGlass) {
+                                if (hasSong) BottomAreaWithPlayerHeight else NavBarAreaHeight
+                            } else {
+                                // En modo simple el bloque es la suma de sus piezas (la
+                                // navegación ya incluye su inset de gestos).
+                                navigationBarInsets +
+                                    if (hasSong) SimpleBottomAreaWithPlayerHeight else SimpleNavBarHeight
+                            },
+                        ),
+                ) {
+                    // Sigue al dedo mientras se hace scroll y se asienta con un muelle.
+                    // El morph del área inferior es exclusivo del cristal líquido: en
+                    // modo simple (Haze) las barras quedan pegadas y no se anima nada.
+                    val collapseState = animateFloatAsState(
+                        targetValue = if (hasSong && liquidGlass) collapseController.target else 0f,
+                        animationSpec = if (collapseController.directManipulation) {
+                            snap()
+                        } else {
+                            spring(
+                                dampingRatio = .82f,
+                                stiffness = 430f,
+                                visibilityThreshold = .001f,
+                            )
+                        },
+                        label = "colapso del area inferior",
+                    )
+                    val collapse = collapseState.value
 
-            currentSong?.let { song ->
-                MiniPlayer(
-                    song = song,
-                    previousSong = neighbors.previous,
-                    nextSong = neighbors.next,
-                    isPlaying = isPlaying,
-                    progressFraction = playbackProgress.fraction,
-                    collapseProgress = collapse,
-                    onTogglePlay = { viewModel.togglePlayPause() },
-                    onPrevious = { viewModel.skipToPrevious() },
-                    onPreviousSong = { viewModel.skipToPreviousSong() },
-                    onNext = { viewModel.skipToNext() },
-                    liquidGlass = liquidGlass,
-                    backdrop = backdrop,
-                    hazeState = hazeState,
-                    modifier = if (liquidGlass) {
-                        Modifier
-                            .width(miniPlayerWidth)
-                            .graphicsLayer {
-                                translationX = sideInsetPx
-                                translationY = collapseDropPx * collapseState.value
-                            }
-                            .zIndex(2f)
+                    val density = LocalDensity.current
+                    // El círculo se centra en la franja de navegación, que va pegada al
+                    // borde inferior con su inset de gestos: su centro queda a
+                    // margen + media píldora + inset del borde de abajo. El mini
+                    // reproductor tiene que caer en esa misma fila, así que baja
+                    // (alto del área - centro de la franja - medio reproductor).
+                    val navRowCenter =
+                        LiquidNavBarPadding + LiquidNavBarHeight / 2 + navigationBarInsets
+                    val collapseDrop = (
+                        BottomAreaWithPlayerHeight - navRowCenter - MiniPlayerCollapsedHeight / 2
+                        ).coerceAtLeast(0.dp)
+                    // Al comprimirse, la navegación se abre hacia los bordes (con el
+                    // mismo margen que usa la barra), así que el mini reproductor
+                    // arranca donde termina el círculo y acaba donde empieza la
+                    // búsqueda: los tres comparten fila y respiro.
+                    val sideInset = if (liquidGlass) {
+                        (
+                            navBarSidePadding(collapse) + LiquidNavBarCollapsedSize +
+                                LiquidNavBarCollapsedGap - MiniPlayerSidePadding
+                            ) * collapse
                     } else {
-                        // Pegada a la navegación: ocupa todo el ancho y reposa
-                        // justo encima, porque el área mide la suma de las dos.
-                        Modifier.fillMaxWidth()
-                    },
-                )
+                        0.dp
+                    }
+                    val sideInsetPx = with(density) { sideInset.toPx() }
+                    val collapseDropPx = with(density) {
+                        (if (liquidGlass) collapseDrop else 0.dp).toPx()
+                    }
+                    val miniPlayerWidth = (maxWidth - sideInset * 2).coerceAtLeast(1.dp)
+
+                    if (liquidGlass) {
+                        LiquidGlassNavBar(
+                            selected = selectedTab,
+                            onSelect = onSelect,
+                            backdrop = backdrop,
+                            onSearchClick = { searchOpen = true },
+                            searchSelected = searchOpen,
+                            collapseProgress = collapse,
+                            onExpandBottomArea = collapseController::expand,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .zIndex(1f),
+                        )
+                    } else {
+                        SimpleNavBar(
+                            selected = selectedTab,
+                            onSelect = onSelect,
+                            onSearchClick = { searchOpen = true },
+                            searchSelected = searchOpen,
+                            hazeState = hazeState,
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                        )
+                    }
+
+                    currentSong?.let { song ->
+                        // La barra se retira cuando el reproductor toma la pantalla;
+                        // al cerrar vuelve, deslizándose desde el propio reproductor.
+                        AnimatedVisibility(
+                            visible = !playerOpen,
+                            enter = fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 220,
+                                    delayMillis = 200,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            ),
+                            exit = fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 120,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            ),
+                            modifier = if (liquidGlass) {
+                                Modifier
+                                    .width(miniPlayerWidth)
+                                    .graphicsLayer {
+                                        translationX = sideInsetPx
+                                        translationY = collapseDropPx * collapseState.value
+                                    }
+                                    .zIndex(2f)
+                            } else {
+                                // Pegada a la navegación: ocupa todo el ancho y reposa
+                                // justo encima, porque el área mide la suma de las dos.
+                                Modifier.fillMaxWidth()
+                            },
+                        ) {
+                            with(this@SharedTransitionLayout) {
+                                MiniPlayer(
+                                    song = song,
+                                    previousSong = neighbors.previous,
+                                    nextSong = neighbors.next,
+                                    isPlaying = isPlaying,
+                                    progressFraction = playbackProgress.fraction,
+                                    collapseProgress = collapse,
+                                    onTogglePlay = { viewModel.togglePlayPause() },
+                                    onPrevious = { viewModel.skipToPrevious() },
+                                    onPreviousSong = { viewModel.skipToPreviousSong() },
+                                    onNext = { viewModel.skipToNext() },
+                                    onOpenPlayer = { playerOpen = true },
+                                    liquidGlass = liquidGlass,
+                                    backdrop = backdrop,
+                                    hazeState = hazeState,
+                                    boundsModifier = Modifier.sharedBounds(
+                                        sharedContentState = rememberSharedContentState(
+                                            LioraPlayerElement.Container,
+                                        ),
+                                        animatedVisibilityScope = this@AnimatedVisibility,
+                                        enter = fadeIn(
+                                            animationSpec = tween(
+                                                durationMillis = 220,
+                                                delayMillis = 190,
+                                                easing = FastOutSlowInEasing,
+                                            ),
+                                        ),
+                                        exit = fadeOut(
+                                            animationSpec = tween(
+                                                durationMillis = 130,
+                                                easing = FastOutSlowInEasing,
+                                            ),
+                                        ),
+                                        boundsTransform = { _, _ -> PlayerMorphSpec },
+                                        resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(),
+                                        clipInOverlayDuringTransition = morphClip,
+                                    ),
+                                    artworkModifier = Modifier.sharedElement(
+                                        sharedContentState = rememberSharedContentState(
+                                            LioraPlayerElement.Artwork,
+                                        ),
+                                        animatedVisibilityScope = this@AnimatedVisibility,
+                                        boundsTransform = { _, _ -> PlayerMorphSpec },
+                                        clipInOverlayDuringTransition = OverlayClip(
+                                            RoundedCornerShape(14.dp),
+                                        ),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Reproductor completo: se despliega desde la barra del mini
+                // reproductor y, al cerrar, recorre el camino a la inversa.
+                AnimatedVisibility(
+                    visible = playerOpen && currentSong != null,
+                    enter = EnterTransition.None,
+                    exit = fadeOut(
+                        animationSpec = tween(
+                            durationMillis = 320,
+                            delayMillis = 80,
+                            easing = FastOutSlowInEasing,
+                        ),
+                    ),
+                    modifier = Modifier.zIndex(10f),
+                ) {
+                    currentSong?.let { song ->
+                        LioraFullPlayer(
+                            song = song,
+                            isPlaying = isPlaying,
+                            progress = playbackProgress,
+                            queue = queueSongs,
+                            shuffleEnabled = shuffleEnabled,
+                            repeatMode = repeatMode,
+                            onClose = { playerOpen = false },
+                            onPlayPause = { viewModel.togglePlayPause() },
+                            onPrevious = { viewModel.skipToPrevious() },
+                            onNext = { viewModel.skipToNext() },
+                            onSeek = { viewModel.seekTo(it) },
+                            onToggleShuffle = { viewModel.toggleShuffle() },
+                            onCycleRepeat = { viewModel.cycleRepeat() },
+                            onPlaySong = { viewModel.playSong(it) },
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this,
+                        )
+                    }
+                }
             }
         }
     }
