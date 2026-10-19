@@ -488,8 +488,9 @@ fun MiniPlayer(
             }
 
             // 4) Línea de progreso: dentro de la barra, pegada al borde de
-            // abajo y con aire en las puntas (en modo simple, de lado a lado).
-            val progressHeight = 1.5.dp + .5.dp * collapse
+            // abajo. En modo simple va de lado a lado; en cristal es una
+            // cápsula con aire a los costados, a juego con las esquinas.
+            val progressHeight = if (simpleBar) 1.5.dp + .5.dp * collapse else 3.dp
             if (simpleBar) {
                 Box(
                     modifier = Modifier
@@ -510,18 +511,18 @@ fun MiniPlayer(
             } else {
                 Box(
                     modifier = Modifier
-                        .offset(x = 14.dp, y = playerHeight - progressHeight - 7.dp)
-                        .width(pillWidth - 28.dp)
+                        .offset(x = 18.dp, y = playerHeight - progressHeight - 6.dp)
+                        .width((pillWidth - 36.dp).coerceAtLeast(1.dp))
                         .height(progressHeight)
                         .clip(CircleShape)
-                        .background(contentColor.copy(alpha = 0.12f)),
+                        .background(contentColor.copy(alpha = 0.10f)),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(animatedFraction)
                             .fillMaxHeight()
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                            .background(contentColor.copy(alpha = 0.75f)),
                     )
                 }
             }

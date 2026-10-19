@@ -65,6 +65,7 @@ import com.liora.android.data.model.AudioFolder
 import com.liora.android.data.prefs.AppStyle
 import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
+import com.liora.android.ui.components.GlassSwitch
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.LioraSnackbarHost
 import com.liora.android.ui.components.glassSource
@@ -162,6 +163,7 @@ fun SettingsScreen(
                     onToggle = { folder, excluded ->
                         viewModel.setFolderExcluded(folder, excluded)
                     },
+                    liquidGlass = liquidGlass,
                 )
             } else {
                 PersonalizationSection(
@@ -188,6 +190,7 @@ fun SettingsScreen(
                     cacheUsageLabel = Formatter.formatShortFileSize(context, cacheBytes),
                     cacheMaxMb = cacheMaxMb,
                     isScanning = isScanning,
+                    liquidGlass = liquidGlass,
                     onOpenFolderPicker = { showFolderPicker = true },
                     onFilterSystemSoundsChange = viewModel::setFilterSystemSounds,
                     onRescan = {
@@ -403,6 +406,7 @@ private fun StorageSection(
     cacheUsageLabel: String,
     cacheMaxMb: Int,
     isScanning: Boolean,
+    liquidGlass: Boolean,
     onOpenFolderPicker: () -> Unit,
     onFilterSystemSoundsChange: (Boolean) -> Unit,
     onRescan: () -> Unit,
@@ -447,10 +451,17 @@ private fun StorageSection(
                 )
             },
             trailingContent = {
-                Switch(
-                    checked = filterSystemSounds,
-                    onCheckedChange = onFilterSystemSoundsChange,
-                )
+                if (liquidGlass) {
+                    GlassSwitch(
+                        checked = filterSystemSounds,
+                        onCheckedChange = onFilterSystemSoundsChange,
+                    )
+                } else {
+                    Switch(
+                        checked = filterSystemSounds,
+                        onCheckedChange = onFilterSystemSoundsChange,
+                    )
+                }
             },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier
@@ -528,6 +539,7 @@ private fun FolderPicker(
     folders: List<AudioFolder>,
     excludedFolders: Set<String>,
     onToggle: (String, Boolean) -> Unit,
+    liquidGlass: Boolean,
 ) {
     Text(
         text = "Elige qué carpetas puede reproducir Liora. Las que apagues no " +
@@ -565,10 +577,17 @@ private fun FolderPicker(
                     )
                 },
                 trailingContent = {
-                    Switch(
-                        checked = enabled,
-                        onCheckedChange = { checked -> onToggle(folder.path, !checked) },
-                    )
+                    if (liquidGlass) {
+                        GlassSwitch(
+                            checked = enabled,
+                            onCheckedChange = { checked -> onToggle(folder.path, !checked) },
+                        )
+                    } else {
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = { checked -> onToggle(folder.path, !checked) },
+                        )
+                    }
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                 modifier = Modifier

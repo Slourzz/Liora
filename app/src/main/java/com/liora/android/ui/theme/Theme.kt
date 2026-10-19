@@ -63,6 +63,68 @@ private val LioraLightColors = lightColorScheme(
 )
 
 /**
+ * Paleta neutra del estilo Glass: solo grises, sin ningún color de marca, para
+ * que el color lo ponga el propio cristal al copiar lo que tiene detrás.
+ */
+internal fun neutralScheme(darkTheme: Boolean): ColorScheme = if (darkTheme) {
+    darkColorScheme(
+        primary = Color(0xFFE8E8EA),
+        onPrimary = Color(0xFF2C2C2E),
+        primaryContainer = Color(0xFF3A3A3C),
+        onPrimaryContainer = Color(0xFFECECEE),
+        secondary = Color(0xFFC7C7CA),
+        onSecondary = Color(0xFF2C2C2E),
+        secondaryContainer = Color(0xFF3A3A3C),
+        onSecondaryContainer = Color(0xFFE4E4E6),
+        tertiary = Color(0xFFB8B8BC),
+        onTertiary = Color(0xFF2C2C2E),
+        tertiaryContainer = Color(0xFF444448),
+        onTertiaryContainer = Color(0xFFE4E4E6),
+        background = Color(0xFF121214),
+        onBackground = Color(0xFFE6E6E8),
+        surface = Color(0xFF121214),
+        onSurface = Color(0xFFE6E6E8),
+        surfaceVariant = Color(0xFF2A2A2C),
+        onSurfaceVariant = Color(0xFFB4B4B8),
+        surfaceContainerLowest = Color(0xFF0D0D0F),
+        surfaceContainerLow = Color(0xFF18181A),
+        surfaceContainer = Color(0xFF1E1E20),
+        surfaceContainerHigh = Color(0xFF242427),
+        surfaceContainerHighest = Color(0xFF2C2C2F),
+        outline = Color(0xFF6E6E72),
+        outlineVariant = Color(0xFF3C3C40),
+    )
+} else {
+    lightColorScheme(
+        primary = Color(0xFF3C3C3E),
+        onPrimary = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFFE4E4E7),
+        onPrimaryContainer = Color(0xFF1B1B1D),
+        secondary = Color(0xFF5A5A5E),
+        onSecondary = Color(0xFFFFFFFF),
+        secondaryContainer = Color(0xFFE8E8EA),
+        onSecondaryContainer = Color(0xFF1B1B1D),
+        tertiary = Color(0xFF6E6E72),
+        onTertiary = Color(0xFFFFFFFF),
+        tertiaryContainer = Color(0xFFEAEAEC),
+        onTertiaryContainer = Color(0xFF1B1B1D),
+        background = Color(0xFFF6F6F7),
+        onBackground = Color(0xFF1B1B1D),
+        surface = Color(0xFFF6F6F7),
+        onSurface = Color(0xFF1B1B1D),
+        surfaceVariant = Color(0xFFE7E7E9),
+        onSurfaceVariant = Color(0xFF46464A),
+        surfaceContainerLowest = Color(0xFFFFFFFF),
+        surfaceContainerLow = Color(0xFFF1F1F3),
+        surfaceContainer = Color(0xFFEBEBEE),
+        surfaceContainerHigh = Color(0xFFE5E5E8),
+        surfaceContainerHighest = Color(0xFFDFDFE2),
+        outline = Color(0xFF77777B),
+        outlineVariant = Color(0xFFC8C8CC),
+    )
+}
+
+/**
  * Tema de Liora.
  *
  * En Android 12 o superior toma los colores del fondo de pantalla del usuario
