@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -101,6 +102,14 @@ fun GlassSwitch(
     // retomó mientras el pulgar se acomodaba.
     var gesture by remember { mutableIntStateOf(0) }
 
+    // El gesto vive dentro de pointerInput, cuyas lambdas no se renuevan en
+    // cada dibujo: si se leyera [checked] directo, al soltar compararía contra
+    // el valor del primer dibujo. Con estas referencias siempre se mira el
+    // estado actual — por eso apagar un interruptor ya encendido también
+    // funciona al arrastrarlo.
+    val currentChecked by rememberUpdatedState(checked)
+    val currentOnCheckedChange by rememberUpdatedState(onCheckedChange)
+
     val settleSpec = spring<Float>(dampingRatio = 1f, stiffness = 1000f)
     val meltSpec = spring<Float>(dampingRatio = .9f, stiffness = 650f)
 
@@ -136,6 +145,10 @@ fun GlassSwitch(
                     var dragged = false
                     var canceled = false
                     var slop = 0f
+                    // El avance del dedo se lleva acá arriba —no dentro del
+                    // animado a saltos— para que al soltar la decisión sea la
+                    // que se vio en pantalla, sin carreras.
+                    var dragFraction = fraction.value
                     scope.launch { press.animateTo(1f, meltSpec) }
 
                     while (true) {
@@ -165,12 +178,9 @@ fun GlassSwitch(
                                 dragged = true
                             }
                             if (dragged) {
-                                scope.launch {
-                                    fraction.snapTo(
-                                        (fraction.value + positionChange.x / travelPx)
-                                            .coerceIn(0f, 1f),
-                                    )
-                                }
+                                dragFraction = (dragFraction + positionChange.x / travelPx)
+                                    .coerceIn(0f, 1f)
+                                scope.launch { fraction.snapTo(dragFraction) }
                                 change.consume()
                             }
                         }
@@ -179,13 +189,14 @@ fun GlassSwitch(
                     // Al soltar: el lado más cercano si fue arrastre, el
                     // contrario si fue un toque; si se canceló (la lista tomó
                     // el gesto), el pulgar vuelve a su lado actual.
+                    val checkedNow = currentChecked
                     val target = when {
-                        canceled -> if (checked) 1f else 0f
-                        dragged -> if (fraction.value >= .5f) 1f else 0f
-                        else -> if (checked) 0f else 1f
+                        canceled -> if (checkedNow) 1f else 0f
+                        dragged -> if (dragFraction >= .5f) 1f else 0f
+                        else -> if (checkedNow) 0f else 1f
                     }
-                    if (!canceled && (target == 1f) != checked) {
-                        onCheckedChange(target == 1f)
+                    if (!canceled && (target == 1f) != checkedNow) {
+                        currentOnCheckedChange(target == 1f)
                     }
                     scope.launch {
                         fraction.animateTo(target, settleSpec)
@@ -197,11 +208,11 @@ fun GlassSwitch(
             }
             .semantics {
                 role = Role.Switch
-                toggleableState = ToggleableState(checked)
+                toggleableState = ToggleableState(currentChecked)
                 onClick(
-                    label = if (checked) "Apagar" else "Encender",
+                    label = if (currentChecked) "Apagar" else "Encender",
                     action = {
-                        onCheckedChange(!checked)
+                        currentOnCheckedChange(!currentChecked)
                         true
                     },
                 )
