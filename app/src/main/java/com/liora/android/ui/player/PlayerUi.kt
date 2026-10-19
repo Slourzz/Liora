@@ -1,13 +1,13 @@
 package com.liora.android.ui.player
 
 import android.app.Activity
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -51,7 +51,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.MusicNote
@@ -79,20 +78,30 @@ import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.addOutline
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -102,9 +111,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import androidx.core.view.WindowCompat
 import androidx.media3.common.Player
 import com.liora.android.data.art.ArtworkRepository
@@ -114,72 +126,30 @@ import com.liora.android.ui.components.PlayPauseMorphIcon
 import com.liora.android.ui.components.rememberSongArtwork
 import com.liora.android.ui.theme.isDark
 import com.liora.android.ui.viewmodel.PlaybackProgress
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.floor
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Milisegundos que tarda la atmósfera en pasar de una portada a otra. */
 private const val AtmosphereTransitionMs = 900
 
-/** Piezas que viajan entre el mini reproductor y el reproductor completo. */
-internal enum class LioraPlayerElement {
-    /** El cuerpo entero: la barra se despliega hasta llenar la pantalla. */
-    Container,
-
-    /** La portada, que es la misma imagen cambiando de sitio y de tamaño. */
-    Artwork,
-}
+/** Milisegundos de una vuelta completa de la nube atmosférica. */
+private const val CloudCycleMs = 90_000
 
 /**
  * El ritmo del viaje: algo más de medio segundo con una curva que arranca
  * decidida y se posa despacio, como la expansión del reproductor de Apple
- * Music. La usan el cuerpo y la portada a la vez, para que viajen pegados.
+ * Music. Lo comparten el despliegue del panel y el vuelo de la portada, para
+ * que viajen pegados.
  */
-internal val PlayerMorphSpec: FiniteAnimationSpec<Rect> = tween(
+internal val PlayerPanelSpec: FiniteAnimationSpec<Float> = tween(
     durationMillis = 540,
     easing = CubicBezierEasing(0.33f, 0f, 0.12f, 1f),
 )
-
-/**
- * Esquinas del cuerpo durante el viaje: arrancan redondeadas como la píldora y
- * se van enderezando a medida que la barra crece hasta la pantalla completa.
- */
-private class PlayerMorphClip(
-    private val compactHeightPx: Float,
-    private val compactCornerPx: Float,
-    private val screenHeightPx: Float,
-) : SharedTransitionScope.OverlayClip {
-    override fun getClipPath(
-        sharedContentState: SharedTransitionScope.SharedContentState,
-        bounds: Rect,
-        layoutDirection: LayoutDirection,
-        density: Density,
-    ): Path {
-        val grown = ((bounds.height - compactHeightPx) /
-            (screenHeightPx - compactHeightPx)).coerceIn(0f, 1f)
-        val corner = compactCornerPx * (1f - grown)
-        val outline = RoundedCornerShape(corner)
-            .createOutline(bounds.size, layoutDirection, density)
-        return Path().apply { addOutline(outline) }
-    }
-}
-
-@Composable
-internal fun rememberPlayerMorphClip(): SharedTransitionScope.OverlayClip {
-    val density = LocalDensity.current
-    val screenHeightPx = with(density) {
-        LocalConfiguration.current.screenHeightDp.dp.toPx()
-    }
-    val compactHeightPx = with(density) { MiniPlayerHeight.toPx() }
-    val compactCornerPx = with(density) { 26.dp.toPx() }
-
-    return remember(compactHeightPx, compactCornerPx, screenHeightPx) {
-        PlayerMorphClip(
-            compactHeightPx = compactHeightPx,
-            compactCornerPx = compactCornerPx,
-            screenHeightPx = screenHeightPx,
-        )
-    }
-}
 
 /** Fondo de noche del reproductor; la atmósfera se pinta encima. */
 private val PlayerNight = Color(0xFF07070A)
@@ -225,13 +195,55 @@ fun LioraFullPlayer(
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
     onPlaySong: (Song) -> Unit,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
+    /** Altura a la que reposa la barra del mini reproductor, en píxeles. */
+    miniTopPx: Float = 0f,
+    /** Dónde y cómo de grande está la portada en la barra: origen del vuelo. */
+    miniArtworkPos: Offset = Offset.Zero,
+    miniArtworkSize: Size = Size.Zero,
+    /** Progreso del despliegue: 0 es la barra y 1 la pantalla completa. */
+    unfold: Animatable<Float, AnimationVector1D>,
+    /** Avisa cuando un dedo agarra o suelta el panel (para que viva la barra). */
+    onDraggingChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentOnClose by rememberUpdatedState(onClose)
+
+    // El cuerpo del reproductor es una hoja que se despliega desde la barra:
+    // arranca pegada a ella y crece solo hacia arriba, con las esquinas de
+    // arriba redondeadas y el pie siempre en el borde inferior de la pantalla.
+    // El contenido no se mueve: el panel lo va descubriendo desde abajo, así
+    // que cada pieza aparece ya en su sitio y la cabecera es lo último que se
+    // ve, igual que en Apple Music. El progreso lo trae el dedo —la barra al
+    // subir, el panel al bajar— y lo asienta quien lo conduce.
+    //
+    // La portada viaja aparte, por encima de todo: una copia vuela desde su
+    // sitio en la barra hasta su sitio en el cuerpo siguiendo el mismo
+    // progreso, y la de verdad espera oculta a que aterrice.
+    val cover = rememberSongArtwork(song, 512)
+    var coverEndPos by remember { mutableStateOf(Offset.Zero) }
+    var coverEndSize by remember { mutableStateOf(Size.Zero) }
+
+    // La portada del cuerpo se mide una vez: su sitio ya no se mueve nunca.
+    val coverMeasure = Modifier.onGloballyPositioned { coords ->
+        if (coverEndSize == Size.Zero && coords.size.width > 0) {
+            coverEndPos = coords.positionInRoot()
+            coverEndSize = coords.size.toSize()
+        }
+    }
+
+    // Bajar la hoja hasta la barra y, ya invisible, devolver el mando para que
+    // el mini reproductor reaparezca con su propia aparición.
+    fun closeWithUnfold() {
+        scope.launch {
+            unfold.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 470, easing = FastOutSlowInEasing),
+            )
+            currentOnClose()
+        }
+    }
 
     var panel by remember { mutableStateOf(PlayerPanel.Artwork) }
     var immersive by remember { mutableStateOf(false) }
@@ -273,7 +285,7 @@ fun LioraFullPlayer(
         label = "fondo inmersivo",
     )
 
-    val requestClose = { currentOnClose() }
+    val requestClose = { closeWithUnfold() }
 
     // Mientras el reproductor está delante, los iconos del sistema van claros.
     val view = LocalView.current
@@ -291,111 +303,111 @@ fun LioraFullPlayer(
 
     BackHandler { requestClose() }
 
-    // Paleta de la portada; si la canción cambia, los colores se funden solos.
-    // Si ya está calculada (la prepara la pantalla principal), el reproductor
-    // nace con sus colores desde el primer fotograma.
-    var palette by remember(song.id) {
-        mutableStateOf(
-            ArtworkRepository.cachedAtmosphereColors(song) ?: AtmosphereFallback,
-        )
+    // Lavado del fondo: la portada suavizada y nivelada, como la mancha de
+    // color de Apple Music. Si ya está preparado (lo hace la pantalla
+    // principal), el reproductor nace con él puesto; al cambiar de canción,
+    // los dos lavados se funden solos, despacio.
+    var wash by remember(song.id) {
+        mutableStateOf(ArtworkRepository.cachedAtmosphereWash(song)?.asImageBitmap())
     }
     LaunchedEffect(song.id) {
-        palette = ArtworkRepository.atmosphereColors(context, song)
+        ArtworkRepository.atmosphereWash(context, song)?.let { wash = it.asImageBitmap() }
     }
 
     val toggleImmersive = { immersive = !immersive }
 
-    // Arrastrar hacia abajo devuelve el reproductor a su barra, como en Apple
-    // Music; el tirón se sigue con el dedo y, al suelto corto, vuelve a su sitio.
-    val pull = remember { Animatable(0f) }
-    val morphClip = rememberPlayerMorphClip()
+    Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    // La ventana del panel: todo lo que queda por debajo de su
+                    // borde vivo, con las esquinas de arriba redondeadas.
+                    val top = miniTopPx * (1f - unfold.value)
+                    val corner = 26.dp.toPx() * (1f - unfold.value)
+                    clipPath(
+                        Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    left = 0f,
+                                    top = top,
+                                    right = size.width,
+                                    bottom = size.height,
+                                    topLeftCornerRadius = CornerRadius(corner, corner),
+                                    topRightCornerRadius = CornerRadius(corner, corner),
+                                    bottomRightCornerRadius = CornerRadius.Zero,
+                                    bottomLeftCornerRadius = CornerRadius.Zero,
+                                ),
+                            )
+                        },
+                    ) {
+                        this@drawWithContent.drawContent()
+                    }
+                }
+                // El fondo del panel vive dentro del recorte: por encima de la
+                // ventana se ve la pantalla de atrás con su velo, no un telón.
+                .background(PlayerNight)
+                .pointerInput(Unit) {
+                    // Bajar el panel lo devuelve a la barra siguiéndole el dedo.
+                    var pulling = false
+                    val range = if (miniTopPx > 1f) miniTopPx else 2000f
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .then(
-                with(sharedTransitionScope) {
-                    Modifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState(
-                            LioraPlayerElement.Container,
-                        ),
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        enter = fadeIn(
-                            animationSpec = tween(
-                                durationMillis = 170,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        ),
-                        exit = fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 240,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        ),
-                        boundsTransform = { _, _ -> PlayerMorphSpec },
-                        resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(),
-                        clipInOverlayDuringTransition = morphClip,
-                    )
-                },
-            )
-            .graphicsLayer { translationY = pull.value }
-            .background(PlayerNight)
-            .pointerInput(Unit) {
-                var pulled = 0f
-                val closeThreshold = 96.dp.toPx()
-                val maxPull = 220.dp.toPx()
-
-                detectVerticalDragGestures(
-                    onDragStart = { pulled = 0f },
-                    onDragEnd = {
-                        val close = pulled >= closeThreshold
-                        scope.launch {
-                            if (close) {
-                                launch { currentOnClose() }
-                                pull.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = tween(
-                                        durationMillis = 180,
-                                        easing = FastOutSlowInEasing,
-                                    ),
-                                )
-                            } else {
-                                pull.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = 480f,
-                                    ),
+                    detectVerticalDragGestures(
+                        onDragStart = { pulling = false },
+                        onDragEnd = {
+                            if (pulling) {
+                                pulling = false
+                                if (unfold.value >= 0.5f) {
+                                    onDraggingChange(false)
+                                    scope.launch { unfold.animateTo(1f, PlayerPanelSpec) }
+                                } else {
+                                    closeWithUnfold()
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            if (pulling) {
+                                pulling = false
+                                onDraggingChange(false)
+                                scope.launch { unfold.animateTo(1f, PlayerPanelSpec) }
+                            }
+                        },
+                    ) { change, dragAmount ->
+                        if (!pulling && dragAmount > 0f) {
+                            pulling = true
+                            onDraggingChange(true)
+                        }
+                        if (pulling) {
+                            change.consume()
+                            scope.launch {
+                                unfold.snapTo(
+                                    (unfold.value - dragAmount / range).coerceIn(0f, 1f),
                                 )
                             }
                         }
-                    },
-                    onDragCancel = {
-                        pulled = 0f
-                        scope.launch {
-                            pull.animateTo(
-                                targetValue = 0f,
-                                animationSpec = tween(180, easing = FastOutSlowInEasing),
-                            )
-                        }
-                    },
-                ) { change, dragAmount ->
-                    if (dragAmount > 0f || pulled > 0f) {
-                        pulled = (pulled + dragAmount).coerceIn(0f, maxPull)
-                        change.consume()
-                        scope.launch { pull.snapTo(pulled * 0.72f) }
                     }
-                }
-            },
-    ) {
-        Atmosphere(colors = palette)
+                },
+        ) {
+            // El contenido vive quieto en su sitio: el panel lo va descubriendo
+            // de abajo arriba, así que no hay que desplazarlo.
+            Box(modifier = Modifier.fillMaxSize()) {
+        Atmosphere(wash = wash, isPlaying = isPlaying)
 
         if (immersiveProgress > 0.01f) {
-            ImmersiveCover(
-                song = song,
-                progress = immersiveProgress,
-                onToggle = toggleImmersive,
-            )
+            // Como el resto del contenido: entra cuando la ventana ya subió.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = (unfold.value / 0.06f).coerceIn(0f, 1f)
+                    },
+            ) {
+                ImmersiveCover(
+                    song = song,
+                    progress = immersiveProgress,
+                    onToggle = toggleImmersive,
+                )
+            }
         }
 
         // Recoge los toques que no caen en un control para que no atraviesen
@@ -411,31 +423,19 @@ fun LioraFullPlayer(
 
         Column(
             modifier = Modifier
+                // El contenido (portada grande, títulos, controles) entra
+                // cuando la ventana ya se ha despegado de la barra; la
+                // superficie teñida que hay detrás, en cambio, está viva desde
+                // el primer píxel: por eso la barra se "recolorea" en cuanto
+                // arranca el gesto, sin que se vea un panel superpuesto.
+                .graphicsLayer {
+                    alpha = (unfold.value / 0.06f).coerceIn(0f, 1f)
+                }
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(horizontal = 24.dp, vertical = 20.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .graphicsLayer {
-                        alpha = detailsAlpha
-                        translationY = (1f - detailsAlpha) * -10.dp.toPx()
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CircleToggle(
-                    active = false,
-                    icon = Icons.Rounded.ExpandMore,
-                    description = "Cerrar",
-                    onClick = { requestClose() },
-                    size = 38.dp,
-                    iconSize = 22.dp,
-                )
-            }
-
             AnimatedContent(
                 targetState = panel,
                 transitionSpec = {
@@ -465,8 +465,8 @@ fun LioraFullPlayer(
                         contentAlpha = detailsAlpha,
                         immersiveProgress = immersiveProgress,
                         onToggleImmersive = toggleImmersive,
-                        sharedTransitionScope = sharedTransitionScope,
-                        animatedVisibilityScope = animatedVisibilityScope,
+                        artworkModifier = coverMeasure,
+                        artworkArrived = { unfold.value >= 0.9985f },
                     )
 
                     PlayerPanel.Queue -> QueuePanel(
@@ -482,7 +482,14 @@ fun LioraFullPlayer(
                 }
             }
 
-            Column(modifier = Modifier.graphicsLayer { alpha = controlsAlpha }) {
+            Column(
+                modifier = Modifier.graphicsLayer {
+                    alpha = controlsAlpha
+                    // Llegan subiendo un pelo, como el módulo que asciende en
+                    // la transición de Apple.
+                    translationY = (1f - controlsAlpha) * 12.dp.toPx()
+                },
+            ) {
                 Spacer(Modifier.height(22.dp))
                 PlayerProgressBar(
                     positionMs = progress.positionMs,
@@ -515,103 +522,194 @@ fun LioraFullPlayer(
                 )
             }
         }
+            }
+        }
+
+        // La portada que viaja: sale del sitio de la barra y aterriza en el del
+        // cuerpo siguiendo el mismo progreso del panel. En los extremos queda
+        // justo encima de la portada de verdad, así que el relevo no se nota.
+        if (cover != null && coverEndSize.width > 0f) {
+            val density = LocalDensity.current
+            Box(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(coverEndPos.x.roundToInt(), coverEndPos.y.roundToInt())
+                    }
+                    .size(
+                        with(density) { coverEndSize.width.toDp() },
+                        with(density) { coverEndSize.height.toDp() },
+                    )
+                    .graphicsLayer {
+                        val progress = unfold.value
+                        val startWidth = miniArtworkSize.width
+                        val startHeight = miniArtworkSize.height
+                        val endWidth = coverEndSize.width
+                        val endHeight = coverEndSize.height
+                        if (endWidth > 0f && endHeight > 0f) {
+                            scaleX = (startWidth + (endWidth - startWidth) * progress) / endWidth
+                            scaleY = (startHeight + (endHeight - startHeight) * progress) / endHeight
+                        }
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        translationX = miniArtworkPos.x +
+                            (coverEndPos.x - miniArtworkPos.x) * progress - coverEndPos.x
+                        translationY = miniArtworkPos.y +
+                            (coverEndPos.y - miniArtworkPos.y) * progress - coverEndPos.y
+                        // Aterrizada o aún en la barra coincide con la portada
+                        // de verdad: se apaga para no dejar un fantasma encima.
+                        alpha = if (progress <= 0.0015f || progress >= 0.9985f) 0f else 1f
+                        // El borde redondeado también viaja: nace con el de la
+                        // barra y termina con el de la portada grande.
+                        shape = RoundedCornerShape((12f + 2f * progress).dp)
+                        clip = true
+                    },
+            ) {
+                Image(
+                    bitmap = cover,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 }
 
 // ------------------------------------------------------------------ atmósfera
 
 /**
- * Fondo ambiental del reproductor: un campo de color que viene de la portada
- * y cubre la pantalla entera —arriba más luminoso, abajo más profundo, pero
- * siempre teñido—, con los destellos repartidos por todo el lienzo. No hay
- * animación continua: solo se funde, en 900 ms, cuando cambia de canción. Al
- * pausar no queda nada en movimiento.
+ * Fondo ambiental del reproductor: la nube cromática que sale de la portada.
+ * Cuatro copias enormes de la imagen —cada una con su escala, su giro y su
+ * deriva— se funden en una sola mancha de color viva, con el movimiento
+ * lentísimo de una nube. Se funde sola al cambiar de canción y se queda
+ * quieta al pausar o con las animaciones del sistema apagadas.
  */
 @Composable
 private fun Atmosphere(
-    colors: List<Color>,
+    wash: ImageBitmap?,
+    isPlaying: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val bloomA by animateColorAsState(
-        targetValue = colors.getOrElse(0) { AtmosphereFallback[0] },
+    Crossfade(
+        targetState = wash,
         animationSpec = tween(AtmosphereTransitionMs, easing = FastOutSlowInEasing),
-        label = "atmósfera principal",
-    )
-    val bloomB by animateColorAsState(
-        targetValue = colors.getOrElse(1) { AtmosphereFallback[1] },
-        animationSpec = tween(AtmosphereTransitionMs, easing = FastOutSlowInEasing),
-        label = "atmósfera secundaria",
-    )
-    val base by animateColorAsState(
-        targetValue = colors.getOrElse(2) { AtmosphereFallback[2] },
-        animationSpec = tween(AtmosphereTransitionMs, easing = FastOutSlowInEasing),
-        label = "atmósfera base",
-    )
+        label = "atmósfera",
+        modifier = modifier.fillMaxSize(),
+    ) { image ->
+        if (image == null) {
+            AtmosphereFallbackField()
+        } else {
+            AtmosphereCloud(image = image, isPlaying = isPlaying)
+        }
+    }
+}
 
-    Canvas(
-        modifier = modifier
-            .fillMaxSize()
-            .blur(radius = 20.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded),
-    ) {
-        val width = size.width
-        val height = size.height
-
-        // Base de arriba a abajo: el tono de la portada se aclara al sol y se
-        // hunde al fondo, pero nunca llega al negro —el color sigue ahí—.
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to lerp(bloomA, Color.White, 0.10f),
-                0.30f to bloomA,
-                0.60f to lerp(bloomA, bloomB, 0.45f),
-                0.82f to lerp(bloomB, base, 0.30f),
-                1f to base,
-            ),
-        )
-
-        fun bloom(center: Offset, radius: Float, color: Color, alpha: Float) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        color.copy(alpha = alpha),
-                        color.copy(alpha = alpha * 0.45f),
-                        Color.Transparent,
-                    ),
-                    center = center,
-                    radius = radius,
-                ),
-                radius = radius,
-                center = center,
+/**
+ * La nube: cuatro capas de la portada dibujadas muy grandes y estiradas con
+ * suavizado —el desenfoque sale gratis al ampliar una imagen diminuta—, que
+ * se mueven despacio en elipses, giros y respiraciones distintas. Todo sale
+ * de una sola fase armónica: la composición nunca salta ni cambia de forma
+ * de golpe, y al pausar se congela en el fotograma en el que estaba.
+ */
+@Composable
+private fun AtmosphereCloud(
+    image: ImageBitmap,
+    isPlaying: Boolean,
+) {
+    val context = LocalContext.current
+    val reduceMotion = remember(context) {
+        Settings.Global.getFloat(
+            context.contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+    }
+    val active = isPlaying && !reduceMotion
+    val phase = remember { Animatable(0f) }
+    LaunchedEffect(active) {
+        if (!active) return@LaunchedEffect
+        while (true) {
+            phase.snapTo(phase.value - floor(phase.value))
+            phase.animateTo(
+                targetValue = phase.value + 1f,
+                animationSpec = tween(durationMillis = CloudCycleMs, easing = LinearEasing),
             )
         }
-
-        // Los destellos reparten el color por toda la pantalla: dos arriba, uno
-        // en medio y dos que sostienen la parte de abajo.
-        bloom(Offset(width * 0.16f, height * 0.06f), width * 1.05f, bloomA, 0.50f)
-        bloom(Offset(width * 0.94f, height * 0.30f), width * 0.95f, bloomB, 0.42f)
-        bloom(
-            center = Offset(width * 0.42f, height * 0.58f),
-            radius = width * 1.20f,
-            color = lerp(bloomA, bloomB, 0.5f),
-            alpha = 0.34f,
-        )
-        bloom(
-            center = Offset(width * 0.10f, height * 0.96f),
-            radius = width * 1.00f,
-            color = lerp(base, bloomB, 0.35f),
-            alpha = 0.42f,
-        )
-        bloom(
-            center = Offset(width * 0.90f, height * 0.88f),
-            radius = width * 0.90f,
-            color = lerp(base, bloomA, 0.25f),
-            alpha = 0.36f,
-        )
-
-        // Un aire para que el texto blanco respire y un velo mínimo contra las
-        // bandas del degradado, como el dither de Cloud.
-        drawRect(Color.Black.copy(alpha = 0.10f))
-        drawRect(Color.White.copy(alpha = 0.015f))
     }
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val width = size.width
+        val height = size.height
+        val span = maxOf(width, height)
+        val progress = phase.value
+
+        fun layer(
+            index: Int,
+            alpha: Float,
+            scale: Float,
+            drift: Float,
+            turn: Float,
+            centerX: Float,
+            centerY: Float,
+        ) {
+            val angle = ((progress + index * 0.27f) % 1f) * 2f * PI.toFloat()
+            val x = width * (centerX + drift * sin(angle))
+            val y = height * (centerY + drift * 0.9f * cos(angle * 0.85f + 0.8f))
+            val side = span * scale * (1f + 0.05f * sin(angle * 0.6f + 1.2f))
+            rotate(
+                degrees = turn * sin(angle * 0.5f + index * 1.3f),
+                pivot = Offset(x, y),
+            ) {
+                drawImage(
+                    image = image,
+                    dstOffset = IntOffset(
+                        (x - side / 2f).roundToInt(),
+                        (y - side / 2f).roundToInt(),
+                    ),
+                    dstSize = IntSize(side.roundToInt(), side.roundToInt()),
+                    alpha = alpha,
+                    filterQuality = FilterQuality.Low,
+                )
+            }
+        }
+
+        // La primera capa cubre la pantalla; las demás se mezclan encima con
+        // escalas y rumbos distintos para que el color se enrede.
+        layer(0, 1.00f, 1.60f, 0.045f, 4f, 0.50f, 0.44f)
+        layer(1, 0.52f, 1.95f, 0.060f, 7f, 0.62f, 0.30f)
+        layer(2, 0.44f, 1.30f, 0.055f, 5f, 0.38f, 0.62f)
+        layer(3, 0.32f, 2.25f, 0.040f, 3f, 0.55f, 0.78f)
+    }
+
+    // Un velo apenas más oscuro en los extremos: la hora, el título y los
+    // controles se leen sin esfuerzo y el color sigue vivo en el centro.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to Color.Black.copy(alpha = 0.20f),
+                    0.24f to Color.Black.copy(alpha = 0.06f),
+                    0.70f to Color.Black.copy(alpha = 0.06f),
+                    1f to Color.Black.copy(alpha = 0.24f),
+                ),
+            ),
+    )
+}
+
+/** Campo neutro para cuando la portada todavía no tiene lavado. */
+@Composable
+private fun AtmosphereFallbackField(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0f to lerp(AtmosphereFallback[0], Color.White, 0.08f),
+                    0.5f to AtmosphereFallback[1],
+                    1f to AtmosphereFallback[2],
+                ),
+            ),
+    )
 }
 
 /**
@@ -721,8 +819,9 @@ private fun ArtworkPanel(
     contentAlpha: Float,
     immersiveProgress: Float,
     onToggleImmersive: () -> Unit,
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
+    /** Mide la portada en su sitio de reposo y la esconde mientras viaja su copia. */
+    artworkModifier: Modifier = Modifier,
+    artworkArrived: () -> Boolean = { true },
     modifier: Modifier = Modifier,
 ) {
     val artwork = rememberSongArtwork(song, 512)
@@ -740,21 +839,8 @@ private fun ArtworkPanel(
             modifier = Modifier
                 .offset(x = 8.dp, y = coverTop)
                 .size(coverSize)
-                .then(
-                    with(sharedTransitionScope) {
-                        Modifier.sharedElement(
-                            sharedContentState = rememberSharedContentState(
-                                LioraPlayerElement.Artwork,
-                            ),
-                            animatedVisibilityScope = animatedVisibilityScope,
-                            boundsTransform = { _, _ -> PlayerMorphSpec },
-                            clipInOverlayDuringTransition = OverlayClip(
-                                RoundedCornerShape(14.dp),
-                            ),
-                        )
-                    },
-                )
-                .graphicsLayer { alpha = squareAlpha }
+                .then(artworkModifier)
+                .graphicsLayer { alpha = squareAlpha * if (artworkArrived()) 1f else 0f }
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color.White.copy(alpha = 0.08f))
                 .pointerInput(Unit) {

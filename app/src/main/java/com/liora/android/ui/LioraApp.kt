@@ -2,8 +2,7 @@ package com.liora.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -12,11 +11,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,14 +34,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.liora.android.data.art.ArtworkRepository
@@ -62,9 +69,7 @@ import com.liora.android.ui.navigation.SimpleNavBar
 import com.liora.android.ui.navigation.SimpleNavBarHeight
 import com.liora.android.ui.navigation.navBarSidePadding
 import com.liora.android.ui.player.LioraFullPlayer
-import com.liora.android.ui.player.LioraPlayerElement
-import com.liora.android.ui.player.PlayerMorphSpec
-import com.liora.android.ui.player.rememberPlayerMorphClip
+import com.liora.android.ui.player.PlayerPanelSpec
 import com.liora.android.ui.screens.HomeScreen
 import com.liora.android.ui.screens.LibraryScreen
 import com.liora.android.ui.screens.SearchScreen
@@ -75,6 +80,7 @@ import com.liora.android.ui.theme.neutralScheme
 import com.liora.android.ui.theme.rememberDynamicColorScheme
 import com.liora.android.ui.viewmodel.MusicViewModel
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.launch
 
 /** Alto de la barra de navegación con sus márgenes. */
 private val NavBarAreaHeight = 86.dp
@@ -191,18 +197,37 @@ private fun LioraAppContent(
     val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
 
-    /** Esquinas que se desabrochan al abrir y cerrar el reproductor. */
-    val morphClip = rememberPlayerMorphClip()
+    /** Altura a la que reposa la barra del mini reproductor, en píxeles. */
+    var miniTopPx by remember { mutableStateOf(0f) }
+
+    /** Dónde y cómo de grande es la portada en la barra: origen del vuelo. */
+    var miniArtworkPos by remember { mutableStateOf(Offset.Zero) }
+    var miniArtworkSize by remember { mutableStateOf(Size.Zero) }
 
     val collapseController = rememberBottomAreaCollapseController()
     val hasSong = currentSong != null
     SideEffect { collapseController.updateHasMiniPlayer(hasSong) }
 
-    // La paleta ambiental se prepara mientras la canción suena en el mini
-    // reproductor: así el reproductor completo nace ya con sus colores.
+    // El despliegue del reproductor lo manda el dedo: 0 es la barra y 1 la
+    // pantalla completa. La barra lo conduce al subirla y el propio panel al
+    // bajarlo; las animaciones de asentamiento viven acá para que no se corten
+    // cuando la barra deja de existir.
+    val playerUnfold = remember { Animatable(0f) }
+    val playerScope = rememberCoroutineScope()
+
+    /** Un dedo lleva el reproductor: la barra sigue viva con él. */
+    var miniDragging by remember { mutableStateOf(false) }
+
+    // Al cerrar del todo, la barra recupera el mando y suelta el arrastre.
+    LaunchedEffect(playerOpen) {
+        if (!playerOpen) miniDragging = false
+    }
+
+    // El lavado del fondo se prepara mientras la canción suena en el mini
+    // reproductor: así el reproductor completo nace ya con su fondo puesto.
     val context = LocalContext.current
     LaunchedEffect(currentSong?.id) {
-        currentSong?.let { ArtworkRepository.atmosphereColors(context, it) }
+        currentSong?.let { ArtworkRepository.atmosphereWash(context, it) }
     }
 
     val tabs = LioraTab.entries
@@ -275,14 +300,18 @@ private fun LioraAppContent(
             }
         }
 
-        // El mini reproductor y el reproductor completo viven bajo el mismo
-        // lienzo de transiciones compartidas: la barra y su portada son las
-        // piezas que viajan de uno a otro.
-        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        // El mini reproductor y el reproductor completo viven en el mismo
+        // lienzo: la barra se apaga bajo el panel y el panel la releva.
+        Box(modifier = Modifier.fillMaxSize()) {
             Box(modifier = Modifier.fillMaxSize()) {
                 BoxWithConstraints(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        // La franja inferior (navegación + barra) va por encima
+                        // del reproductor: así se la ve bajar y apagarse durante
+                        // el despliegue, como en Apple Music, y la superficie que
+                        // se recolorea es la suya.
+                        .zIndex(10.5f)
                         .fillMaxWidth()
                         .height(
                             if (liquidGlass) {
@@ -342,6 +371,29 @@ private fun LioraAppContent(
                     }
                     val miniPlayerWidth = (maxWidth - sideInset * 2).coerceAtLeast(1.dp)
 
+                    // Cuánto baja la franja de navegación al abrirse el
+                    // reproductor: su propia altura con su inset de gestos.
+                    val navSlidePx = with(density) {
+                        if (liquidGlass) {
+                            (LiquidNavBarPadding + LiquidNavBarHeight + navigationBarInsets).toPx()
+                        } else {
+                            (SimpleNavBarHeight + navigationBarInsets).toPx()
+                        }
+                    }
+
+                    // La navegación acompaña al gesto, como en Apple Music: el
+                    // panel la empuja hacia abajo (recorre su alto en la primera
+                    // mitad del despliegue) y se apaga antes de llegar abajo.
+                    // Va por encima del reproductor para que se la vea caer, y
+                    // por debajo de la barra del mini.
+                    val navSlide = Modifier
+                        .zIndex(10.5f)
+                        .graphicsLayer {
+                            val unfold = playerUnfold.value
+                            translationY = navSlidePx * (unfold / 0.5f).coerceIn(0f, 1f)
+                            alpha = (1f - unfold / 0.25f).coerceIn(0f, 1f)
+                        }
+
                     if (liquidGlass) {
                         LiquidGlassNavBar(
                             selected = selectedTab,
@@ -353,7 +405,7 @@ private fun LioraAppContent(
                             onExpandBottomArea = collapseController::expand,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                .zIndex(1f),
+                                .then(navSlide),
                         )
                     } else {
                         SimpleNavBar(
@@ -362,7 +414,9 @@ private fun LioraAppContent(
                             onSearchClick = { searchOpen = true },
                             searchSelected = searchOpen,
                             hazeState = hazeState,
-                            modifier = Modifier.align(Alignment.BottomCenter),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .then(navSlide),
                         )
                     }
 
@@ -370,11 +424,11 @@ private fun LioraAppContent(
                         // La barra se retira cuando el reproductor toma la pantalla;
                         // al cerrar vuelve, deslizándose desde el propio reproductor.
                         AnimatedVisibility(
-                            visible = !playerOpen,
+                            visible = !playerOpen || miniDragging,
                             enter = fadeIn(
                                 animationSpec = tween(
                                     durationMillis = 220,
-                                    delayMillis = 200,
+                                    delayMillis = 40,
                                     easing = FastOutSlowInEasing,
                                 ),
                             ),
@@ -391,63 +445,115 @@ private fun LioraAppContent(
                                         translationX = sideInsetPx
                                         translationY = collapseDropPx * collapseState.value
                                     }
-                                    .zIndex(2f)
+                                    .zIndex(11f)
                             } else {
                                 // Pegada a la navegación: ocupa todo el ancho y reposa
                                 // justo encima, porque el área mide la suma de las dos.
-                                Modifier.fillMaxWidth()
+                                // Va por encima del reproductor que sube, como la barra
+                                // de Apple Music, y se apaga cuando el panel la tapa.
+                                Modifier
+                                    .fillMaxWidth()
+                                    .zIndex(11f)
                             },
                         ) {
-                            with(this@SharedTransitionLayout) {
-                                MiniPlayer(
-                                    song = song,
-                                    previousSong = neighbors.previous,
-                                    nextSong = neighbors.next,
-                                    isPlaying = isPlaying,
-                                    progressFraction = playbackProgress.fraction,
-                                    collapseProgress = collapse,
-                                    onTogglePlay = { viewModel.togglePlayPause() },
-                                    onPrevious = { viewModel.skipToPrevious() },
-                                    onPreviousSong = { viewModel.skipToPreviousSong() },
-                                    onNext = { viewModel.skipToNext() },
-                                    onOpenPlayer = { playerOpen = true },
-                                    liquidGlass = liquidGlass,
-                                    backdrop = backdrop,
-                                    hazeState = hazeState,
-                                    boundsModifier = Modifier.sharedBounds(
-                                        sharedContentState = rememberSharedContentState(
-                                            LioraPlayerElement.Container,
-                                        ),
-                                        animatedVisibilityScope = this@AnimatedVisibility,
-                                        enter = fadeIn(
-                                            animationSpec = tween(
-                                                durationMillis = 220,
-                                                delayMillis = 190,
-                                                easing = FastOutSlowInEasing,
-                                            ),
-                                        ),
-                                        exit = fadeOut(
-                                            animationSpec = tween(
-                                                durationMillis = 130,
-                                                easing = FastOutSlowInEasing,
-                                            ),
-                                        ),
-                                        boundsTransform = { _, _ -> PlayerMorphSpec },
-                                        resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(),
-                                        clipInOverlayDuringTransition = morphClip,
-                                    ),
-                                    artworkModifier = Modifier.sharedElement(
-                                        sharedContentState = rememberSharedContentState(
-                                            LioraPlayerElement.Artwork,
-                                        ),
-                                        animatedVisibilityScope = this@AnimatedVisibility,
-                                        boundsTransform = { _, _ -> PlayerMorphSpec },
-                                        clipInOverlayDuringTransition = OverlayClip(
-                                            RoundedCornerShape(14.dp),
-                                        ),
-                                    ),
-                                )
-                            }
+                            MiniPlayer(
+                                song = song,
+                                previousSong = neighbors.previous,
+                                nextSong = neighbors.next,
+                                isPlaying = isPlaying,
+                                progressFraction = playbackProgress.fraction,
+                                collapseProgress = collapse,
+                                onTogglePlay = { viewModel.togglePlayPause() },
+                                onPrevious = { viewModel.skipToPrevious() },
+                                onPreviousSong = { viewModel.skipToPreviousSong() },
+                                onNext = { viewModel.skipToNext() },
+                                onOpenFromTap = {
+                                    if (!playerOpen) {
+                                        playerOpen = true
+                                        playerScope.launch {
+                                            playerUnfold.animateTo(1f, PlayerPanelSpec)
+                                        }
+                                    }
+                                },
+                                onOpenDragStart = {
+                                    // El reproductor nace ya con el panel en su
+                                    // sitio: desde el primer tramo el dedo manda.
+                                    if (!playerOpen) playerOpen = true
+                                    miniDragging = true
+                                },
+                                onOpenDrag = { dy ->
+                                    // Subir la altura entera de la barra despliega
+                                    // el panel entero, como en Apple Music.
+                                    val range = if (miniTopPx > 1f) miniTopPx else 2000f
+                                    playerScope.launch {
+                                        playerUnfold.snapTo(
+                                            (playerUnfold.value - dy / range).coerceIn(0f, 1f),
+                                        )
+                                    }
+                                },
+                                onOpenDragEnd = {
+                                    if (playerUnfold.value >= 0.45f) {
+                                        miniDragging = false
+                                        playerScope.launch {
+                                            playerUnfold.animateTo(1f, PlayerPanelSpec)
+                                        }
+                                    } else {
+                                        // Vuelve a su sitio: el panel baja y, ya
+                                        // invisible, la barra se rearma sola.
+                                        playerScope.launch {
+                                            playerUnfold.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = tween(
+                                                    durationMillis = 280,
+                                                    easing = FastOutSlowInEasing,
+                                                ),
+                                            )
+                                            playerOpen = false
+                                            miniDragging = false
+                                        }
+                                    }
+                                },
+                                liquidGlass = liquidGlass,
+                                backdrop = backdrop,
+                                hazeState = hazeState,
+                                modifier = Modifier
+                                    // La barra se apaga a medida que el panel la
+                                    // releva, tanto al abrir como al cerrar.
+                                    .graphicsLayer {
+                                        if (playerOpen) {
+                                            // La barra no se apaga: se
+                                            // recolorea. Su superficie deja
+                                            // paso a la teñida en un par de
+                                            // fotogramas —el cromo desaparece
+                                            // de golpe, como en Apple— y al
+                                            // cerrar vuelve igual de rápido.
+                                            alpha = (1f - playerUnfold.value / 0.04f)
+                                                .coerceIn(0f, 1f)
+                                        }
+                                    }
+                                    .onGloballyPositioned { coords ->
+                                        // Dónde reposa la barra: es la altura desde
+                                        // la que arranca el despliegue del reproductor.
+                                        if (coords.positionInRoot().y > 0f) {
+                                            miniTopPx = coords.positionInRoot().y
+                                        }
+                                    },
+                                artworkModifier = Modifier
+                                    // La portada de la barra se mide para que la
+                                    // copia que vuela sepa de dónde sale; en
+                                    // cuanto la copia queda encima (idéntica, al
+                                    // mismo píxel) la de la barra se apaga, para
+                                    // que nunca haya dos portadas a la vez.
+                                    .graphicsLayer {
+                                        if (playerUnfold.value > 0.0015f) alpha = 0f
+                                    }
+                                    .onGloballyPositioned { coords ->
+                                        if (coords.size.width > 0) {
+                                            miniArtworkPos = coords.positionInRoot()
+                                            miniArtworkSize = coords.size.toSize()
+                                        }
+                                    },
+                            )
                         }
                     }
                 }
@@ -475,6 +581,8 @@ private fun LioraAppContent(
                             shuffleEnabled = shuffleEnabled,
                             repeatMode = repeatMode,
                             onClose = { playerOpen = false },
+                            unfold = playerUnfold,
+                            onDraggingChange = { miniDragging = it },
                             onPlayPause = { viewModel.togglePlayPause() },
                             onPrevious = { viewModel.skipToPrevious() },
                             onNext = { viewModel.skipToNext() },
@@ -482,8 +590,9 @@ private fun LioraAppContent(
                             onToggleShuffle = { viewModel.toggleShuffle() },
                             onCycleRepeat = { viewModel.cycleRepeat() },
                             onPlaySong = { viewModel.playSong(it) },
-                            sharedTransitionScope = this@SharedTransitionLayout,
-                            animatedVisibilityScope = this,
+                            miniTopPx = miniTopPx,
+                            miniArtworkPos = miniArtworkPos,
+                            miniArtworkSize = miniArtworkSize,
                         )
                     }
                 }

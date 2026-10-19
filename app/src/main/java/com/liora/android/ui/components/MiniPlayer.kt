@@ -58,6 +58,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.compose.ui.unit.sp
 import com.kyant.backdrop.Backdrop
 import com.liora.android.data.model.Song
@@ -131,7 +132,14 @@ fun MiniPlayer(
     onPrevious: () -> Unit,
     onPreviousSong: () -> Unit,
     onNext: () -> Unit,
-    onOpenPlayer: () -> Unit,
+    /** Toque simple: abre el reproductor con su subida sola. */
+    onOpenFromTap: () -> Unit,
+    /** Un dedo empezó a subir la barra: el reproductor ya debe existir. */
+    onOpenDragStart: () -> Unit,
+    /** Tramo de dedo (px, negativo arriba) para mover el despliegue. */
+    onOpenDrag: (Float) -> Unit,
+    /** Se soltó el dedo: quien conduce el progreso decide dónde se asienta. */
+    onOpenDragEnd: () -> Unit,
     liquidGlass: Boolean,
     backdrop: Backdrop,
     hazeState: HazeState,
@@ -190,6 +198,14 @@ fun MiniPlayer(
         animationSpec = spring(dampingRatio = .62f, stiffness = 420f),
         label = "escala del reproductor",
     )
+
+    // Subir la barra es tirar del reproductor: el progreso del despliegue lo
+    // manda el dedo y quien lo conduce (el propio reproductor) lo asienta al
+    // soltar, como en Apple Music.
+    val currentOnOpenFromTap by rememberUpdatedState(onOpenFromTap)
+    val currentOnOpenDragStart by rememberUpdatedState(onOpenDragStart)
+    val currentOnOpenDrag by rememberUpdatedState(onOpenDrag)
+    val currentOnOpenDragEnd by rememberUpdatedState(onOpenDragEnd)
 
     BoxWithConstraints(
         modifier = modifier
@@ -259,8 +275,8 @@ fun MiniPlayer(
         Box(
             modifier = pillModifier
                 // Un toque sobre la barra (sin deslizar) abre el reproductor.
-                .pointerInput(onOpenPlayer) {
-                    detectTapGestures(onTap = { onOpenPlayer() })
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { currentOnOpenFromTap() })
                 }
                 .pointerInput(nextSong?.id, previousSong?.id, liquidGlass) {
                 val velocityTracker = VelocityTracker()
@@ -269,72 +285,114 @@ fun MiniPlayer(
                     scope.launch { slide.animateTo(0f, settleSpec) }
                 }
 
+                // 0 = aún sin decidir, 1 = deslizar la cinta, 2 = subir la barra.
+                var axis = 0
+
+                /** Un dedo agarró la barra para subir el reproductor. */
+                var pulling = false
+
                 detectDragGestures(
                     onDragStart = {
                         velocityTracker.resetTracking()
                         dragging = true
+                        axis = 0
+                        pulling = false
                     },
                     onDrag = { change, dragAmount ->
-                        change.consume()
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-
-                        val width = windowWidthState.value
-                        val raw = slide.value + dragAmount.x
-                        // Sin vecino de ese lado casi no se estira: frena seco.
-                        val resisted = when {
-                            raw < 0f && nextSong == null -> raw * 0.18f
-                            raw > 0f && previousSong == null -> raw * 0.18f
-                            else -> raw
+                        if (axis == 0) {
+                            axis = if (abs(dragAmount.y) > abs(dragAmount.x) * 1.2f) 2 else 1
                         }
-                        scope.launch {
-                            slide.snapTo(resisted.coerceIn(-width * 1.05f, width * 1.05f))
+                        if (axis == 2) {
+                            // Subir la barra es tirar del reproductor: el panel
+                            // sube pegado al dedo y vuelve a bajar si se
+                            // retrocede antes de soltar.
+                            if (!pulling && dragAmount.y < 0f) {
+                                pulling = true
+                                currentOnOpenDragStart()
+                            }
+                            if (pulling) {
+                                change.consume()
+                                currentOnOpenDrag(dragAmount.y)
+                            }
+                        } else {
+                            change.consume()
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+
+                            val width = windowWidthState.value
+                            val raw = slide.value + dragAmount.x
+                            // Sin vecino de ese lado casi no se estira: frena seco.
+                            val resisted = when {
+                                raw < 0f && nextSong == null -> raw * 0.18f
+                                raw > 0f && previousSong == null -> raw * 0.18f
+                                else -> raw
+                            }
+                            scope.launch {
+                                slide.snapTo(resisted.coerceIn(-width * 1.05f, width * 1.05f))
+                            }
                         }
                     },
                     onDragEnd = {
                         dragging = false
-                        val velocity = velocityTracker.calculateVelocity().x
-                        val offset = slide.value
-                        val threshold = commitThresholdState.value
-                        val goNext = (offset <= -threshold || velocity <= -CommitVelocity) &&
-                            nextSong != null
-                        val goPrevious = (offset >= threshold || velocity >= CommitVelocity) &&
-                            previousSong != null
-
-                        if (goNext || goPrevious) {
-                            scope.launch {
-                                val direction = if (goNext) 1 else -1
-                                val width = windowWidthState.value
-                                val fromId = currentSongId.value
-
-                                pendingCommit = true
-                                // La cinta completa: la actual acaba de salir y
-                                // la vecina queda centrada, sin saltos.
-                                slide.animateTo(
-                                    targetValue = direction * width,
-                                    animationSpec = tween(
-                                        durationMillis = 240,
-                                        easing = FastOutSlowInEasing,
-                                    ),
-                                )
-                                if (direction > 0) onNext() else onPreviousSong()
-
-                                val changed = withTimeoutOrNull(600L) {
-                                    snapshotFlow { currentSongId.value }.first { it != fromId }
-                                } != null
-                                if (!changed) {
-                                    // No cambió de pista (p. ej. "anterior"
-                                    // reinició la canción): vuelve a su sitio.
-                                    pendingCommit = false
-                                    slide.animateTo(0f, settleSpec)
-                                }
+                        if (axis == 2) {
+                            // Al soltar, quien lleve el progreso decide si el
+                            // panel termina de subir o vuelve a ser barra.
+                            if (pulling) {
+                                pulling = false
+                                currentOnOpenDragEnd()
                             }
                         } else {
-                            settleBack()
+                            val velocity = velocityTracker.calculateVelocity().x
+                            val offset = slide.value
+                            val threshold = commitThresholdState.value
+                            val goNext = (offset <= -threshold || velocity <= -CommitVelocity) &&
+                                nextSong != null
+                            val goPrevious = (offset >= threshold || velocity >= CommitVelocity) &&
+                                previousSong != null
+
+                            if (goNext || goPrevious) {
+                                scope.launch {
+                                    val direction = if (goNext) 1 else -1
+                                    val width = windowWidthState.value
+                                    val fromId = currentSongId.value
+
+                                    pendingCommit = true
+                                    // La cinta completa: la actual acaba de salir y
+                                    // la vecina queda centrada, sin saltos.
+                                    slide.animateTo(
+                                        targetValue = direction * width,
+                                        animationSpec = tween(
+                                            durationMillis = 240,
+                                            easing = FastOutSlowInEasing,
+                                        ),
+                                    )
+                                    if (direction > 0) onNext() else onPreviousSong()
+
+                                    val changed = withTimeoutOrNull(600L) {
+                                        snapshotFlow { currentSongId.value }
+                                            .first { it != fromId }
+                                    } != null
+                                    if (!changed) {
+                                        // No cambió de pista (p. ej. "anterior"
+                                        // reinició la canción): vuelve a su sitio.
+                                        pendingCommit = false
+                                        slide.animateTo(0f, settleSpec)
+                                    }
+                                }
+                            } else {
+                                settleBack()
+                            }
                         }
                     },
                     onDragCancel = {
                         dragging = false
-                        settleBack()
+                        if (axis == 2) {
+                            if (pulling) {
+                                pulling = false
+                                currentOnOpenDragEnd()
+                            }
+                        } else {
+                            settleBack()
+                        }
                     },
                 )
             },
