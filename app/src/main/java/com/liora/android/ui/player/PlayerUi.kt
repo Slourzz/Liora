@@ -131,7 +131,6 @@ import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Milisegundos que tarda la atmósfera en pasar de una portada a otra. */
@@ -247,35 +246,10 @@ fun LioraFullPlayer(
 
     var panel by remember { mutableStateOf(PlayerPanel.Artwork) }
     var immersive by remember { mutableStateOf(false) }
-    var entered by remember { mutableStateOf(false) }
 
-    // La aparición interna espera un suspiro al primer fotograma, como Cloud.
-    LaunchedEffect(Unit) {
-        delay(24L)
-        entered = true
-    }
-
-    // Los detalles y los controles llegan escalonados, después de que el
-    // cuerpo haya tomado la pantalla: primero el título y el artista; un
-    // suspiro después, la barra de progreso y el transporte.
-    val detailsAlpha by animateFloatAsState(
-        targetValue = if (entered) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 320,
-            delayMillis = 150,
-            easing = FastOutSlowInEasing,
-        ),
-        label = "detalles del reproductor",
-    )
-    val controlsAlpha by animateFloatAsState(
-        targetValue = if (entered) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 340,
-            delayMillis = 230,
-            easing = FastOutSlowInEasing,
-        ),
-        label = "controles del reproductor",
-    )
+    // Los detalles y los controles ya no llegan por reloj: su entrada va
+    // cosida al propio despliegue (ver más abajo), así que acompañan al dedo
+    // —al abrir y al cerrar— y el arrastre no se siente plano.
     val immersiveProgress by animateFloatAsState(
         targetValue = if (immersive) 1f else 0f,
         animationSpec = tween(
@@ -462,7 +436,7 @@ fun LioraFullPlayer(
                 when (selectedPanel) {
                     PlayerPanel.Artwork -> ArtworkPanel(
                         song = song,
-                        contentAlpha = detailsAlpha,
+                        contentProgress = { unfold.value },
                         immersiveProgress = immersiveProgress,
                         onToggleImmersive = toggleImmersive,
                         artworkModifier = coverMeasure,
@@ -474,7 +448,7 @@ fun LioraFullPlayer(
                         queue = queue,
                         shuffleEnabled = shuffleEnabled,
                         repeatMode = repeatMode,
-                        contentAlpha = detailsAlpha,
+                        contentProgress = { unfold.value },
                         onPlaySong = onPlaySong,
                         onToggleShuffle = onToggleShuffle,
                         onCycleRepeat = onCycleRepeat,
@@ -484,10 +458,12 @@ fun LioraFullPlayer(
 
             Column(
                 modifier = Modifier.graphicsLayer {
-                    alpha = controlsAlpha
-                    // Llegan subiendo un pelo, como el módulo que asciende en
-                    // la transición de Apple.
-                    translationY = (1f - controlsAlpha) * 12.dp.toPx()
+                    // Los controles completan la composición después, también
+                    // siguiendo el arrastre: suben y aparecen a medida que el
+                    // panel toma la pantalla.
+                    val arrival = ((unfold.value - 0.30f) / 0.42f).coerceIn(0f, 1f)
+                    alpha = arrival
+                    translationY = (1f - arrival) * 22.dp.toPx()
                 },
             ) {
                 Spacer(Modifier.height(22.dp))
@@ -816,7 +792,7 @@ private fun ImmersiveCover(
 @Composable
 private fun ArtworkPanel(
     song: Song,
-    contentAlpha: Float,
+    contentProgress: () -> Float,
     immersiveProgress: Float,
     onToggleImmersive: () -> Unit,
     /** Mide la portada en su sitio de reposo y la esconde mientras viaja su copia. */
@@ -874,11 +850,7 @@ private fun ArtworkPanel(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .graphicsLayer {
-                    alpha = contentAlpha
-                    translationY = (1f - contentAlpha) * 18.dp.toPx()
-                },
+                .fillMaxWidth(),
         ) {
             Text(
                 text = song.title,
@@ -887,6 +859,13 @@ private fun ArtworkPanel(
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer {
+                    // El texto sube con el propio gesto —cuanto más alto el
+                    // panel, más cerca de su sitio—, así no se siente plano.
+                    val arrival = ((contentProgress() - 0.16f) / 0.36f).coerceIn(0f, 1f)
+                    alpha = arrival
+                    translationY = (1f - arrival) * 26.dp.toPx()
+                },
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -896,6 +875,12 @@ private fun ArtworkPanel(
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer {
+                    // El artista llega un suspiro después, para dar profundidad.
+                    val arrival = ((contentProgress() - 0.20f) / 0.36f).coerceIn(0f, 1f)
+                    alpha = arrival
+                    translationY = (1f - arrival) * 32.dp.toPx()
+                },
             )
         }
     }
@@ -913,7 +898,7 @@ private fun QueuePanel(
     queue: List<Song>,
     shuffleEnabled: Boolean,
     repeatMode: Int,
-    contentAlpha: Float,
+    contentProgress: () -> Float,
     onPlaySong: (Song) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
@@ -925,7 +910,12 @@ private fun QueuePanel(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = contentAlpha },
+            .graphicsLayer {
+                // La cola también aterriza con el gesto, como los detalles.
+                val arrival = ((contentProgress() - 0.16f) / 0.36f).coerceIn(0f, 1f)
+                alpha = arrival
+                translationY = (1f - arrival) * 26.dp.toPx()
+            },
     ) {
         QueueHeader(song = currentSong)
 
