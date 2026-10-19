@@ -9,6 +9,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.liora.android.data.cache.PlaybackCache
 import com.liora.android.data.model.AudioFolder
@@ -114,6 +115,9 @@ class MusicViewModel(
 
     private var mediaController: MediaController? = null
 
+    /** Conexión en marcha (o ya hecha) con el servicio de reproducción. */
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+
     /** Mientras no se haya intentado volver a la sesión anterior. */
     private var restorePending = true
 
@@ -121,12 +125,17 @@ class MusicViewModel(
     private var restoring = false
 
     fun initializeMediaController(context: Context) {
+        // Solo se conecta una vez: si la pantalla se recrea, la conexión que ya
+        // está en marcha sirve igual.
+        if (controllerFuture != null) return
+
         val sessionToken = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-        controllerFuture.addListener({
+        val future = MediaController.Builder(context, sessionToken).buildAsync()
+        controllerFuture = future
+        future.addListener({
             // El campo se asigna ANTES de usar el controlador: dentro del
             // apply() todavía sería null y la restauración saldría sin hacer nada.
-            val controller = controllerFuture.get()
+            val controller = future.get()
             mediaController = controller
             controller.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(playing: Boolean) {
@@ -422,6 +431,23 @@ class MusicViewModel(
         // Última oportunidad de dejar guardado dónde iba la música.
         savePlaybackState()
         progressJob?.cancel()
-        mediaController?.release()
+        releaseController()
+    }
+
+    /**
+     * Suelta la conexión con el servicio de reproducción. Si todavía estaba
+     * conectando se cancela el intento; si ya estaba hecha, se cierra el
+     * controlador. El try/catch cubre un fallo conocido de media3 cuando la app
+     * se cierra justo mientras conecta (el servicio aún no estaba registrado).
+     */
+    private fun releaseController() {
+        val future = controllerFuture
+        if (future != null && !future.isDone) {
+            MediaController.releaseFuture(future)
+        } else {
+            runCatching { mediaController?.release() }
+        }
+        controllerFuture = null
+        mediaController = null
     }
 }
