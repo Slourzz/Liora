@@ -509,19 +509,20 @@ fun MiniPlayer(
                     )
                 }
             } else {
+                // Nivel de líquido: de borde a borde y pegado al fondo de la
+                // píldora. La forma del cristal recorta las esquinas, así que
+                // el progreso sigue su curvatura sin salirse nunca.
                 Box(
                     modifier = Modifier
-                        .offset(x = 18.dp, y = playerHeight - progressHeight - 6.dp)
-                        .width((pillWidth - 36.dp).coerceAtLeast(1.dp))
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
                         .height(progressHeight)
-                        .clip(CircleShape)
                         .background(contentColor.copy(alpha = 0.10f)),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(animatedFraction)
                             .fillMaxHeight()
-                            .clip(CircleShape)
                             .background(contentColor.copy(alpha = 0.75f)),
                     )
                 }
