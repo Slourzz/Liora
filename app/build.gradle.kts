@@ -44,6 +44,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.foundation)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
 
@@ -51,11 +52,12 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
 
-    // Haze (efectos de cristal / blur)
+    // Haze: alternativa de desenfoque para el modo simple y para API 24.
     implementation(libs.haze)
     implementation(libs.haze.blur)
     implementation(libs.haze.blur.materials)
 
-    // Backdrop (cristal líquido con refracción real)
-    implementation(libs.backdrop)
+    // PrismalAGSL (material óptico del cristal). El material de Kyant0 queda
+    // conservado en la rama backup/kyant0-material-20261019.
+    implementation(project(":prismal"))
 }

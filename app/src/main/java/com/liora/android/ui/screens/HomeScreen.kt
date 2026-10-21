@@ -26,7 +26,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.SongRow
 import com.liora.android.ui.components.glassSource
@@ -40,7 +40,7 @@ fun HomeScreen(
     hasPermission: Boolean,
     onRequestPermissions: () -> Unit,
     liquidGlass: Boolean,
-    backdrop: LayerBackdrop,
+    backdrop: PrismalGlassLayer,
     hazeState: HazeState,
     bottomPadding: Dp,
     collapseConnection: NestedScrollConnection,

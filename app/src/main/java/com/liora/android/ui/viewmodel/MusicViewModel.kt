@@ -2,6 +2,7 @@ package com.liora.android.ui.viewmodel
 
 import android.content.ComponentName
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -12,9 +13,16 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.liora.android.data.cache.PlaybackCache
+import com.liora.android.data.lyrics.LioraLyricsRepository
+import com.liora.android.data.lyrics.LyricsTranslationProgress
+import com.liora.android.data.lyrics.LyricsTranslationRepository
 import com.liora.android.data.model.AudioFolder
+import com.liora.android.data.model.LyricLine
+import com.liora.android.data.model.LyricsAttribution
+import com.liora.android.data.model.LyricsResult
 import com.liora.android.data.model.Song
 import com.liora.android.data.model.toAudioFolders
+import com.liora.android.data.model.withTranslation
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.service.PlaybackService
@@ -24,8 +32,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed class UiState {
     object Loading : UiState()
@@ -53,10 +64,29 @@ data class QueueNeighbors(
     val next: Song? = null,
 )
 
+/**
+ * En qué punto está la traducción de la letra actual.
+ *
+ * La traducción la pide el servicio de Unison: primero se le manda el bloque
+ * de líneas y después se pintan ya traducidas.
+ */
+sealed interface LyricsTranslationState {
+    /** Nada que traducir: la letra ya viene traducida o nadie lo ha pedido. */
+    data object Idle : LyricsTranslationState
+
+    /** Se está traduciendo línea a línea. */
+    data class Translating(val done: Int, val total: Int) : LyricsTranslationState
+
+    /** No se pudo traducir. */
+    data class Failed(val message: String) : LyricsTranslationState
+}
+
 class MusicViewModel(
     private val repository: MediaRepository,
     private val prefs: LioraPrefs,
     private val cache: PlaybackCache,
+    private val lyricsRepository: LioraLyricsRepository,
+    private val translationRepository: LyricsTranslationRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
@@ -92,13 +122,302 @@ class MusicViewModel(
             cache.trimTo(prefs.cacheMaxMb)
             _cacheBytes.value = cache.usageBytes()
         }
+        refreshStoredLyricsCount()
+    }
+
+    /** Cuenta las pistas que ya tienen sus letras guardadas. */
+    fun refreshStoredLyricsCount() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _storedLyricsCount.value = runCatching { lyricsRepository.storedCount() }.getOrDefault(0)
+        }
+    }
+
+    /**
+     * Borra las letras guardadas: la próxima vez que suene cada pista, sus
+     * letras se buscan otra vez.
+     */
+    fun clearStoredLyrics() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { lyricsRepository.clearStored() }
+            }
+            // El espejo en memoria se vacía aquí, en el hilo principal, que es
+            // el único que lo consulta.
+            lyricsBySong.clear()
+            _storedLyricsCount.value = 0
+        }
     }
 
     private val _currentSong = MutableStateFlow<Song?>(null)
     val currentSong: StateFlow<Song?> = _currentSong.asStateFlow()
 
+    /** Letras sincronizadas de la canción actual; llegan solas al cambiar de pista. */
+    private val _lyrics = MutableStateFlow<List<LyricLine>>(emptyList())
+    val lyrics: StateFlow<List<LyricLine>> = _lyrics.asStateFlow()
+
+    /** Verdadero mientras se buscan las letras de la canción actual. */
+    private val _lyricsLoading = MutableStateFlow(false)
+    val lyricsLoading: StateFlow<Boolean> = _lyricsLoading.asStateFlow()
+
+    /** Proveedor y créditos de las letras actuales, para la atribución del panel. */
+    private val _lyricsAttribution = MutableStateFlow<LyricsAttribution?>(null)
+    val lyricsAttribution: StateFlow<LyricsAttribution?> = _lyricsAttribution.asStateFlow()
+
+    /** En qué punto está la traducción de la letra actual. */
+    private val _lyricsTranslation = MutableStateFlow<LyricsTranslationState>(LyricsTranslationState.Idle)
+    val lyricsTranslation: StateFlow<LyricsTranslationState> = _lyricsTranslation.asStateFlow()
+
+    /**
+     * El error de traducción pendiente de enseñar.
+     *
+     * Se limpia en cuanto se cierra el diálogo, así que el mismo fallo no
+     * vuelve a aparecer en cada recomposición.
+     */
+    private val _translationError = MutableStateFlow<String?>(null)
+    val translationError: StateFlow<String?> = _translationError.asStateFlow()
+
+    /** Cierra el diálogo de error: el fallo ya se ha visto. */
+    fun dismissTranslationError() {
+        _translationError.value = null
+    }
+
+    /** La traducción en marcha: al cambiar de canción se cancela. */
+    private var translationJob: Job? = null
+
+    /** La letra tal como la trae la fuente, sin traducir. */
+    private var lyricsOriginal: List<LyricLine> = emptyList()
+
+    /** La letra traducida, si la hay; vacía mientras no la haya. */
+    private var lyricsTranslated: List<LyricLine> = emptyList()
+
+    /** Si la letra que se ve es la traducida. */
+    private val _lyricsTranslationVisible = MutableStateFlow(false)
+    val lyricsTranslationVisible: StateFlow<Boolean> = _lyricsTranslationVisible.asStateFlow()
+
+    /** Cuántas pistas tienen ya sus letras guardadas con ellas. */
+    private val _storedLyricsCount = MutableStateFlow(0)
+    val storedLyricsCount: StateFlow<Int> = _storedLyricsCount.asStateFlow()
+
+    init {
+        // Cada pista nueva dispara su propia búsqueda; el identificador es la
+        // clave, de modo que volver a colgarle las letras no la busca otra vez.
+        // collectLatest cancela la búsqueda anterior si el usuario salta de
+        // canción antes de que termine.
+        viewModelScope.launch {
+            _currentSong
+                .distinctUntilChangedBy { it?.id }
+                .collectLatest { song ->
+                    // La búsqueda anterior se ha cancelado: el cartel de
+                    // "buscando" se limpia antes de empezar con la nueva.
+                    _lyricsLoading.value = false
+                    // Y con ella la traducción que estuviera en marcha: su
+                    // resultado ya no valdría para otra canción.
+                    translationJob?.cancel()
+                    translationJob = null
+                    _lyricsTranslation.value = LyricsTranslationState.Idle
+                    lyricsOriginal = emptyList()
+                    lyricsTranslated = emptyList()
+                    _lyricsTranslationVisible.value = false
+                    if (song == null) {
+                        _lyrics.value = emptyList()
+                        _lyricsAttribution.value = null
+                        return@collectLatest
+                    }
+                    _lyrics.value = emptyList()
+                    _lyricsAttribution.value = null
+
+                    // Las letras viajan con la pista: si ya están guardadas con
+                    // ella aparecen al instante, sin buscar nada y sin el
+                    // "Buscando letras…" de por medio.
+                    val stored = runCatching { lyricsRepository.storedLyrics(song) }
+                        .getOrNull()
+                    if (stored != null) {
+                        publishLyrics(song, stored)
+                        return@collectLatest
+                    }
+
+                    _lyricsLoading.value = true
+                    val result = runCatching { lyricsRepository.findLyrics(song) }
+                        .getOrDefault(LyricsResult())
+                    // La cancelación solo se nota en los puntos de espera: si
+                    // mientras tanto sonó otra canción, este resultado es de
+                    // la anterior y no se publica.
+                    if (_currentSong.value?.id != song.id) return@collectLatest
+                    publishLyrics(song, result)
+                    _lyricsLoading.value = false
+                    // La letra recién guardada cuenta para Ajustes.
+                    refreshStoredLyricsCount()
+                }
+        }
+    }
+
+    /**
+     * Las letras ya resueltas de cada pista, para que la canción vaya siempre
+     * con las suyas. Es el espejo en memoria de lo que está guardado en disco.
+     */
+    private val lyricsBySong = mutableMapOf<Long, LyricsResult>()
+
+    /**
+     * Publica las letras de la pista y se las cuelga encima: a partir de aquí
+     * la canción ya lleva las suyas y no hay que volver a buscarlas.
+     */
+    private fun publishLyrics(song: Song, result: LyricsResult) {
+        // Las letras se guardan siempre —sirven para cuando vuelva a sonar—,
+        // pero solo se publican si la canción sigue siendo la que suena: un
+        // resultado tardío de la anterior no puede sustituir a la actual.
+        lyricsBySong[song.id] = result
+        if (_currentSong.value?.id != song.id) return
+        lyricsOriginal = result.lines
+        lyricsTranslated = result.lines.withTranslationText()
+        _lyrics.value = result.lines
+        _lyricsAttribution.value = result.attribution
+        _currentSong.value = song.copy(lyrics = result)
+    }
+
+    /**
+     * Las líneas con la traducción puesta, si la hay. El original se sustituye
+     * por la traducción, con su mismo ritmo.
+     *
+     * Si ninguna línea trae traducción, la lista queda vacía: así se sabe que
+     * todavía no hay traducción que enseñar (y hay que pedirla).
+     */
+    private fun List<LyricLine>.withTranslationText(): List<LyricLine> {
+        if (none { !it.translation.isNullOrBlank() }) return emptyList()
+        return map { line ->
+            val text = line.translation
+            if (text.isNullOrBlank()) line else line.withTranslation(text)
+        }
+    }
+
+    /**
+     * Publica la canción que suena, con sus letras encima si ya las tiene: el
+     * reproductor va devolviendo la pista sin ellas y hay que volver a
+     * colgárselas.
+     */
+    private fun publishSong(song: Song?) {
+        _currentSong.value = song?.let { current ->
+            lyricsBySong[current.id]?.let { current.copy(lyrics = it) } ?: current
+        }
+    }
+
+    /**
+     * Traduce la letra de la canción que suena, con el servicio de Unison.
+     *
+     * Si la fuente ya trajo traducción, esa se muestra tal cual y aquí no hay
+     * nada que hacer. Si no, se le pide la traducción al servicio: la letra
+     * original no se toca —la traducción se pega a su línea y los tiempos
+     * quedan como estaban— y si el servicio falla, la letra se queda como
+     * estaba y se enseña el error.
+     */
+    fun requestLyricsTranslation() {
+        val song = _currentSong.value ?: return
+        val lines = lyricsOriginal
+        if (lines.isEmpty()) return
+        // Si la fuente ya la tradujo, esa es la traducción.
+        if (lines.any { !it.translation.isNullOrBlank() }) return
+
+        Log.i("LioraTraduce", "Petición de traducción para ${song.title}")
+        translationJob?.cancel()
+        translationJob = viewModelScope.launch {
+            val target = prefs.lyricsTranslationLanguage
+            val outcome = runCatching {
+                translationRepository.translate(song, lines, target) { progress ->
+                    _lyricsTranslation.value = when (progress) {
+                        is LyricsTranslationProgress.Translating ->
+                            LyricsTranslationState.Translating(progress.done, progress.total)
+                    }
+                }
+            }
+            // Si mientras tanto sonó otra canción, este resultado no vale.
+            if (_currentSong.value?.id != song.id) return@launch
+            outcome
+                .onSuccess { translated ->
+                    // La traducción se cuelga de la línea original, que no se
+                    // toca: en la letra guardada conviven las dos.
+                    val withTranslation = lines.zip(translated) { line, text ->
+                        if (text.isBlank()) line else line.copy(translation = text)
+                    }
+                    lyricsOriginal = withTranslation
+                    lyricsTranslated = withTranslation.withTranslationText()
+                    lyricsBySong[song.id] = lyricsBySong[song.id]
+                        ?.copy(lines = withTranslation)
+                        ?: LyricsResult(lines = withTranslation)
+                    _lyricsTranslationVisible.value = true
+                    _lyrics.value = lyricsTranslated
+                    _lyricsTranslation.value = LyricsTranslationState.Idle
+
+                    // Y se guarda con la pista: la traducción viaja dentro de la
+                    // letra y la próxima vez está aunque no haya conexión.
+                    runCatching {
+                        lyricsRepository.saveLyrics(
+                            song = song,
+                            result = LyricsResult(
+                                lines = withTranslation,
+                                attribution = _lyricsAttribution.value,
+                            ),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    // La letra original se queda: un fallo nunca la borra.
+                    _lyricsTranslation.value = LyricsTranslationState.Idle
+                    _translationError.value = translationErrorMessage(error)
+                }
+        }
+    }
+
+    /**
+     * El motivo de un fallo, en cristiano: lo que dice el servicio viene con
+     * códigos y en inglés, así que se traduce a lo que pasó.
+     */
+    private fun translationErrorMessage(error: Throwable): String {
+        val reason = error.message.orEmpty()
+        return when {
+            reason.isBlank() -> "No se pudo traducir la letra."
+            else -> reason
+        }
+    }
+
+    /**
+     * Enseña la letra traducida u original.
+     *
+     * Cuando se pide la traducción y todavía no la hay, se traduce en el
+     * teléfono: el original se retira en cuanto llega la traducción.
+     */
+    fun setLyricsTranslationVisible(visible: Boolean) {
+        if (!visible) {
+            _lyricsTranslationVisible.value = false
+            _lyrics.value = lyricsOriginal
+            return
+        }
+        if (lyricsTranslated.isNotEmpty()) {
+            _lyricsTranslationVisible.value = true
+            _lyrics.value = lyricsTranslated
+            return
+        }
+        // La fuente ya trajo traducción: se usa esa.
+        if (lyricsOriginal.any { !it.translation.isNullOrBlank() }) {
+            lyricsTranslated = lyricsOriginal.withTranslationText()
+            _lyricsTranslationVisible.value = true
+            _lyrics.value = lyricsTranslated
+            return
+        }
+        // Si no, se traduce aquí mismo.
+        requestLyricsTranslation()
+    }
+
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+
+    /**
+     * Lo que el usuario quiere oír, más allá de lo que suena ahora mismo.
+     *
+     * Mientras el reproductor carga, [isPlaying] es false aunque la canción
+     * vaya a sonar: el botón tiene que mirar aquí, o una pausa se convertiría
+     * en un "play" y la música seguiría sonando.
+     */
+    private val _playWhenReady = MutableStateFlow(false)
+    val playWhenReady: StateFlow<Boolean> = _playWhenReady.asStateFlow()
 
     /** Cola de reproducción actual, en el mismo orden que el reproductor. */
     private var queue: List<Song> = emptyList()
@@ -154,11 +473,33 @@ class MusicViewModel(
                     _isPlaying.value = playing
                     // Pausa o reanudación: el momento exacto que interesa guardar.
                     savePlaybackState()
+
+                    /*
+                     * La posición y la pausa van en el mismo par de estado.
+                     * Sin esto, al pausar en medio de una palabra la letra
+                     * puede reaccionar a una posición de hace hasta 500 ms
+                     * (el último poll del ticker): reloj hacia atrás, la
+                     * palabra pierde su color, y con el siguiente poll
+                     * (1.5 s en pausa) lo recupera. Se ve como el
+                     * parpadeo "desaparece y aparece".
+                     */
+                    refreshProgress()
+                }
+
+                /**
+                 * Cambia la intención de sonar: el botón tiene que mirar aquí
+                 * y no en el estado, porque entre carga y carga hay un rato
+                 * en el que la música todavía no suena pero va a sonar.
+                 */
+                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                    _playWhenReady.value = playWhenReady
+                    // Al parar de verdad no queda nada sonando.
+                    if (!playWhenReady) _isPlaying.value = false
                 }
 
                 /** Se dispara al cambiar de pista (automático o manual). */
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    _currentSong.value = songOf(mediaItem)
+                    publishSong(songOf(mediaItem))
                     refreshProgress()
                     refreshNeighbors()
                     savePlaybackState()
@@ -167,6 +508,7 @@ class MusicViewModel(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
                         _isPlaying.value = false
+                        refreshProgress()
                         savePlaybackState()
                     }
                 }
@@ -181,8 +523,10 @@ class MusicViewModel(
             })
             _shuffleEnabled.value = controller.shuffleModeEnabled
             _repeatMode.value = controller.repeatMode
+            _playWhenReady.value = controller.playWhenReady
+            _isPlaying.value = controller.isPlaying
             adoptRunningSession()
-            _currentSong.value = songOf(controller.currentMediaItem)
+            publishSong(songOf(controller.currentMediaItem))
             refreshProgress()
             refreshNeighbors()
             startProgressTicker()
@@ -227,7 +571,7 @@ class MusicViewModel(
         restoring = true
         queue = songs
         _queueSongs.value = queue
-        _currentSong.value = song
+        publishSong(song)
         controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, prefs.lastPositionMs)
         controller.prepare()
         if (prefs.lastPlaying) controller.play()
@@ -243,7 +587,9 @@ class MusicViewModel(
         prefs.savePlayback(
             songId = id,
             positionMs = controller.currentPosition.coerceAtLeast(0L),
-            playing = controller.isPlaying,
+            // La intención, no el estado: si estaba sonando aunque fuera a
+            // cargando, al volver debe seguir sonando.
+            playing = controller.playWhenReady,
         )
     }
 
@@ -361,7 +707,7 @@ class MusicViewModel(
 
         queue = songs
         _queueSongs.value = queue
-        _currentSong.value = song
+        publishSong(song)
 
         mediaController?.let { controller ->
             controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, 0L)
@@ -373,7 +719,10 @@ class MusicViewModel(
 
     fun togglePlayPause() {
         mediaController?.let { controller ->
-            if (controller.isPlaying) controller.pause() else controller.play()
+            // Manda la intención, no el estado: mientras el reproductor carga,
+            // `isPlaying` es false y una pausa se convertiría en un "play" —
+            // la canción seguiría sonando con el botón en pausa.
+            if (controller.playWhenReady) controller.pause() else controller.play()
         }
     }
 
@@ -440,6 +789,12 @@ class MusicViewModel(
             var ticks = 0
             while (isActive) {
                 refreshProgress()
+                // Red de seguridad: si la pista que suena no es la que se está
+                // enseñando, se corrige. Algún aviso del reproductor se puede
+                // escapar por alto (un salto desde la notificación, un
+                // cambio de pista en cola) y el título se quedaría en la
+                // canción anterior.
+                syncCurrentSong()
                 val playing = mediaController?.isPlaying == true
                 // Cada 5 s de música se guarda el punto exacto por el que va.
                 if (playing && ++ticks >= 10) {
@@ -451,10 +806,28 @@ class MusicViewModel(
         }
     }
 
-    /** Convierte un MediaItem del reproductor de vuelta a su [Song] usando el mediaId. */
+    /**
+     * Comprueba que la canción que se enseña sea la que suena en el
+     * reproductor y, si no lo es, publica la correcta.
+     */
+    private fun syncCurrentSong() {
+        val controller = mediaController ?: return
+        val playing = songOf(controller.currentMediaItem) ?: return
+        if (_currentSong.value?.id == playing.id) return
+        publishSong(playing)
+        refreshNeighbors()
+    }
+
+    /**
+     * Convierte un MediaItem del reproductor de vuelta a su [Song] usando el mediaId.
+     *
+     * La cola es lo primero, pero si la biblioteca se ha vuelto a leer puede no
+     * estar al día: la biblioteca completa hace de respaldo, para no perder la
+     * canción que suena y dejar el reproductor en blanco.
+     */
     private fun songOf(mediaItem: MediaItem?): Song? {
         val id = mediaItem?.mediaId?.toLongOrNull() ?: return null
-        return queue.firstOrNull { it.id == id }
+        return queue.firstOrNull { it.id == id } ?: songById(mediaItem.mediaId)
     }
 
     /**

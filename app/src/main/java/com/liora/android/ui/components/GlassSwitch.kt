@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -36,18 +37,18 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberBackdrop
-import com.kyant.backdrop.backdrops.rememberCanvasBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
 import com.liora.android.ui.theme.isDark
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.prismalBlur
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalCanvasSource
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalMergedSource
+import com.styropyr0.prismal.sources.rememberPrismalWrappedSource
+import com.styropyr0.prismal.specular.PrismalSpecular
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -120,18 +121,25 @@ fun GlassSwitch(
         }
     }
 
-    val trackBackdrop = rememberLayerBackdrop()
-    val glass = rememberCombinedBackdrop(
-        rememberCanvasBackdrop { drawRect(background) },
-        rememberBackdrop(trackBackdrop) { drawBackdrop ->
+    val trackBackdrop = rememberPrismalGlassLayer()
+    val backgroundSource = rememberPrismalCanvasSource(
+        onDraw = remember(background) { { drawRect(background) } },
+    )
+    val wrappedDraw: DrawScope.(DrawScope.() -> Unit) -> Unit = remember(trackBackdrop, press) {
+        { drawSource ->
             scale(
                 scaleX = lerp(2f / 3f, .75f, press.value),
                 scaleY = lerp(0f, .75f, press.value),
             ) {
-                drawBackdrop()
+                drawSource()
             }
-        },
+        }
+    }
+    val trackSource = rememberPrismalWrappedSource(
+        backdrop = trackBackdrop,
+        onDraw = wrappedDraw,
     )
+    val glass = rememberPrismalMergedSource(backgroundSource, trackSource)
 
     Box(
         contentAlignment = Alignment.CenterStart,
@@ -221,7 +229,7 @@ fun GlassSwitch(
         // Pista: es la capa que el pulgar copia por dentro.
         Box(
             Modifier
-                .layerBackdrop(trackBackdrop)
+                .prismalGlassLayer(trackBackdrop)
                 .clip(CapsuleShape)
                 .background(trackColor)
                 .size(width = TrackWidth, height = TrackHeight),
@@ -239,35 +247,35 @@ fun GlassSwitch(
                     scaleX = growth
                     scaleY = growth
                 }
-                .drawBackdrop(
+                .drawPrismalGlass(
                     backdrop = glass,
                     shape = { CapsuleShape },
                     effects = {
                         val progress = press.value
-                        blur(8.dp.toPx() * (1f - progress))
-                        lens(
+                        prismalBlur(8.dp.toPx() * (1f - progress))
+                        prismalLens(
                             refractionHeight = 5.dp.toPx() * progress,
                             refractionAmount = 10.dp.toPx() * progress,
-                            chromaticAberration = true,
+                            chromaticAberration = 0.55f * progress,
                         )
                     },
-                    highlight = {
+                    specular = {
                         val progress = press.value
-                        Highlight.Ambient.copy(
-                            width = Highlight.Ambient.width / 1.5f,
-                            blurRadius = Highlight.Ambient.blurRadius / 1.5f,
+                        PrismalSpecular.Ambient.copy(
+                            width = 0.5.dp / 1.5f,
+                            blurRadius = 0.25.dp / 1.5f,
                             alpha = progress,
                         )
                     },
-                    shadow = {
-                        Shadow(
+                    depthShadow = {
+                        PrismalDepthShadow(
                             radius = 4.dp,
                             color = Color.Black.copy(alpha = .05f),
                         )
                     },
-                    innerShadow = {
+                    depthInset = {
                         val progress = press.value
-                        InnerShadow(radius = 4.dp * progress, alpha = progress)
+                        PrismalDepthInset(radius = 4.dp * progress, alpha = progress)
                     },
                     onDrawSurface = {
                         drawRect(Color.White.copy(alpha = 1f - press.value))

@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "LioraAndroid"
 include(":app")
+include(":prismal")

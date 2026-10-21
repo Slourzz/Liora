@@ -12,6 +12,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import com.liora.android.data.cache.PlaybackCache
+import com.liora.android.data.identification.SongIdentificationRepository
+import com.liora.android.data.lyrics.AppleMusicLyricsRepository
+import com.liora.android.data.lyrics.LioraLyricsRepository
+import com.liora.android.data.lyrics.LyricsStore
+import com.liora.android.data.lyrics.LyricsTranslationRepository
+import com.liora.android.data.lyrics.SpicyLyricsRepository
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.ui.LioraApp
@@ -42,6 +48,13 @@ class MainActivity : ComponentActivity() {
             repository = repository,
             prefs = LioraPrefs(applicationContext),
             cache = PlaybackCache(applicationContext),
+            lyricsRepository = LioraLyricsRepository(
+                spicyLyrics = SpicyLyricsRepository(applicationContext),
+                appleMusicLyrics = AppleMusicLyricsRepository(applicationContext),
+                songIdentification = SongIdentificationRepository(applicationContext),
+                store = LyricsStore(applicationContext),
+            ),
+            translationRepository = LyricsTranslationRepository(applicationContext),
         )
         viewModel.initializeMediaController(this)
 

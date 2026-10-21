@@ -21,7 +21,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.SongRow
 import com.liora.android.ui.components.glassSource
@@ -36,7 +36,7 @@ import dev.chrisbanes.haze.HazeState
 fun LibraryScreen(
     viewModel: MusicViewModel,
     liquidGlass: Boolean,
-    backdrop: LayerBackdrop,
+    backdrop: PrismalGlassLayer,
     hazeState: HazeState,
     bottomPadding: Dp,
     collapseConnection: NestedScrollConnection,

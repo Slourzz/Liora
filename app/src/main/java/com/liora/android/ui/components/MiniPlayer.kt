@@ -60,7 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import androidx.compose.ui.unit.sp
-import com.kyant.backdrop.Backdrop
+import com.styropyr0.prismal.PrismalBackdrop
 import com.liora.android.data.model.Song
 import com.liora.android.ui.theme.isDark
 import dev.chrisbanes.haze.HazeState
@@ -125,7 +125,12 @@ fun MiniPlayer(
     song: Song,
     previousSong: Song?,
     nextSong: Song?,
-    isPlaying: Boolean,
+    /**
+     * La intención de sonar. El botón mira esto y no el estado real: entre
+     * carga y carga la música todavía no suena, pero va a sonar, y el icono
+     * tiene que prometer la pausa y no el play.
+     */
+    playWhenReady: Boolean,
     progressFraction: Float,
     collapseProgress: Float,
     onTogglePlay: () -> Unit,
@@ -141,7 +146,7 @@ fun MiniPlayer(
     /** Se soltó el dedo: quien conduce el progreso decide dónde se asienta. */
     onOpenDragEnd: () -> Unit,
     liquidGlass: Boolean,
-    backdrop: Backdrop,
+    backdrop: PrismalBackdrop,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
     boundsModifier: Modifier = Modifier,
@@ -464,7 +469,7 @@ fun MiniPlayer(
                             .graphicsLayer { alpha = expandedControlsAlpha },
                     ) {
                         PlayPauseMorphIcon(
-                            isPlaying = isPlaying,
+                            isPlaying = playWhenReady,
                             color = contentColor,
                             modifier = Modifier.size(26.dp),
                         )
@@ -479,7 +484,7 @@ fun MiniPlayer(
                             .graphicsLayer { alpha = expandedControlsAlpha },
                     ) {
                         PlayPauseMorphIcon(
-                            isPlaying = isPlaying,
+                            isPlaying = playWhenReady,
                             color = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(22.dp),
                         )
@@ -519,7 +524,7 @@ fun MiniPlayer(
                             .graphicsLayer { alpha = compactControlsAlpha },
                     ) {
                         PlayPauseMorphIcon(
-                            isPlaying = isPlaying,
+                            isPlaying = playWhenReady,
                             color = contentColor,
                             modifier = Modifier.size(24.dp),
                         )
@@ -534,7 +539,7 @@ fun MiniPlayer(
                             .graphicsLayer { alpha = compactControlsAlpha },
                     ) {
                         PlayPauseMorphIcon(
-                            isPlaying = isPlaying,
+                            isPlaying = playWhenReady,
                             color = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(20.dp),
                         )

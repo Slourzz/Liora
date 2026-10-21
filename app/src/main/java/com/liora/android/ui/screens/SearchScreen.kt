@@ -45,7 +45,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.SongRow
 import com.liora.android.ui.components.glassSource
@@ -79,7 +79,7 @@ private val SearchContentTop = SearchFieldTop + SearchFieldHeight + 12.dp
 fun SearchScreen(
     viewModel: MusicViewModel,
     liquidGlass: Boolean,
-    backdrop: LayerBackdrop,
+    backdrop: PrismalGlassLayer,
     hazeState: HazeState,
     bottomPadding: Dp,
     collapseConnection: NestedScrollConnection,
@@ -183,7 +183,7 @@ private fun SearchField(
     query: String,
     onQueryChange: (String) -> Unit,
     liquidGlass: Boolean,
-    backdrop: LayerBackdrop,
+    backdrop: PrismalGlassLayer,
     hazeState: HazeState,
     focusRequester: FocusRequester,
     onSubmit: () -> Unit,

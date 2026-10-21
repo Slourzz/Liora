@@ -2,17 +2,16 @@ package com.liora.android.ui.navigation
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -58,18 +57,21 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.kyant.backdrop.Backdrop
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberCombinedBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
-import com.kyant.backdrop.highlight.Highlight
-import com.kyant.backdrop.shadow.InnerShadow
-import com.kyant.backdrop.shadow.Shadow
+import com.liora.android.ui.components.prismalButtonScale
+import com.liora.android.ui.components.rememberPrismalButtonPhysics
 import com.liora.android.ui.theme.isDark
+import com.styropyr0.prismal.PrismalBackdrop
+import com.styropyr0.prismal.components.PrismalGlassButton
+import com.styropyr0.prismal.depth.PrismalDepthInset
+import com.styropyr0.prismal.depth.PrismalDepthShadow
+import com.styropyr0.prismal.drawPrismalGlass
+import com.styropyr0.prismal.effects.applyPrismalGlassEffects
+import com.styropyr0.prismal.effects.prismalLens
+import com.styropyr0.prismal.sources.PrismalGlassLayer
+import com.styropyr0.prismal.sources.prismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
+import com.styropyr0.prismal.sources.rememberPrismalMergedSource
+import com.styropyr0.prismal.specular.PrismalSpecular
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.hazeBlur
@@ -225,7 +227,7 @@ private fun SimpleNavItem(
 fun LiquidGlassNavBar(
     selected: LioraTab,
     onSelect: (LioraTab) -> Unit,
-    backdrop: Backdrop,
+    backdrop: PrismalBackdrop,
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
     collapseProgress: Float = 0f,
@@ -241,6 +243,7 @@ fun LiquidGlassNavBar(
     val pressProgress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
+    val expandPhysics = rememberPrismalButtonPhysics()
     val pressSpec = remember {
         spring<Float>(dampingRatio = 1f, stiffness = 1000f, visibilityThreshold = 0.001f)
     }
@@ -252,11 +255,11 @@ fun LiquidGlassNavBar(
     val barShape = RoundedCornerShape(31.dp)
     val selectorShape = RoundedCornerShape(26.dp)
 
-    val tabsBackdrop = rememberLayerBackdrop()
-    val barBackdrop = rememberLayerBackdrop()
-    // El selector copia el cristal ya desenfocado de la barra + los iconos:
+    val tabsBackdrop = rememberPrismalGlassLayer()
+    val barBackdrop = rememberPrismalGlassLayer()
+    // El selector copia el cristal ya procesado de la barra + los iconos:
     // así refracta los iconos sin mostrar el fondo "crudo".
-    val selectorBackdrop = rememberCombinedBackdrop(barBackdrop, tabsBackdrop)
+    val selectorBackdrop = rememberPrismalMergedSource(barBackdrop, tabsBackdrop)
 
     val darkMode = MaterialTheme.colorScheme.isDark
     val surfaceColor = if (darkMode) {
@@ -280,42 +283,20 @@ fun LiquidGlassNavBar(
     // escena para no pagar su copia del fondo ni su lente.
     val showSelector = contentAlpha > .02f
 
-    // El botón de búsqueda sólo reacciona con una escala de presión (sin jalón
-    // elástico): la lente se lee en fase de dibujo y no recomputa nada.
-    var searchPressed by remember { mutableStateOf(false) }
-    val searchPress = animateFloatAsState(
-        targetValue = if (searchPressed) 1f else 0f,
-        animationSpec = pressSpec,
-        label = "presion busqueda",
-    )
-    val searchGlass = remember(backdrop, barShape, surfaceColor, searchPress) {
-        Modifier.drawBackdrop(
+    val barGlass = remember(backdrop, barShape, surfaceColor, barBackdrop) {
+        Modifier.drawPrismalGlass(
             backdrop = backdrop,
             shape = { barShape },
             effects = {
-                vibrancy()
-                blur(4.dp.toPx())
-                lens(16.dp.toPx(), 32.dp.toPx())
-            },
-            layerBlock = {
-                val maxScale = (size.width + 16.dp.toPx()) / size.width.coerceAtLeast(1f)
-                val scale = 1f + (maxScale - 1f) * searchPress.value
-                scaleX = scale
-                scaleY = scale
-            },
-            highlight = { Highlight.Default },
-            onDrawSurface = { drawRect(surfaceColor) },
-        )
-    }
-
-    val barGlass = remember(backdrop, barShape, surfaceColor) {
-        Modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { barShape },
-            effects = {
-                vibrancy()
-                blur(4.dp.toPx())
-                lens(16.dp.toPx(), 32.dp.toPx())
+                applyPrismalGlassEffects(
+                    density = this,
+                    adaptiveLuminance = false,
+                    luminance = 0.5f,
+                    blurRadiusPx = 4.dp.toPx(),
+                    refractionHeightPx = 16.dp.toPx(),
+                    refractionAmountPx = 32.dp.toPx(),
+                    useVibrancy = true,
+                )
             },
             layerBlock = {
                 val maxScale = (size.width + 16.dp.toPx()) / size.width.coerceAtLeast(1f)
@@ -323,30 +304,38 @@ fun LiquidGlassNavBar(
                 scaleX = scale
                 scaleY = scale
             },
-            exportedBackdrop = barBackdrop,
+            nestedGlassSource = barBackdrop,
+            specular = { PrismalSpecular.Default },
+            depthShadow = null,
             onDrawSurface = { drawRect(surfaceColor) },
         )
     }
 
-    val selectorGlass = remember(selectorBackdrop, selectorShape, selectorColor) {        Modifier.drawBackdrop(
+    val selectorGlass = remember(selectorBackdrop, selectorShape, selectorColor, barBackdrop) {
+        Modifier.drawPrismalGlass(
             backdrop = selectorBackdrop,
             shape = { selectorShape },
             effects = {
                 val strength = 0.45f + 0.55f * pressProgress.value
-                lens(
+                prismalLens(
                     refractionHeight = 10.dp.toPx() * strength,
                     refractionAmount = 14.dp.toPx() * strength,
-                    chromaticAberration = true,
+                    chromaticAberration = 0.55f * strength,
                 )
             },
-            highlight = {
-                Highlight.Default.copy(alpha = 0.5f + 0.5f * pressProgress.value)
+            specular = {
+                PrismalSpecular.Default.copy(
+                    alpha = 0.5f + 0.5f * pressProgress.value,
+                )
             },
-            shadow = {
-                Shadow(radius = 6.dp, alpha = pressProgress.value)
+            depthShadow = {
+                PrismalDepthShadow(
+                    radius = 6.dp,
+                    alpha = pressProgress.value,
+                )
             },
-            innerShadow = {
-                InnerShadow(
+            depthInset = {
+                PrismalDepthInset(
                     radius = 8.dp * pressProgress.value,
                     alpha = pressProgress.value,
                 )
@@ -401,7 +390,18 @@ fun LiquidGlassNavBar(
                 .align(Alignment.CenterStart)
                 .width(pillWidth)
                 .height(pillHeight)
+                // La misma física del afijo también deforma el cristal: al
+                // presionar/arrastrar el chevron, el material crece y estira
+                // con el dedo en vez de dejar el icono flotando sobre un
+                // círculo rígido.
+                .prismalButtonScale(
+                    physics = expandPhysics,
+                    pressLift = 4.dp,
+                )
                 .then(barGlass)
+                // La iluminación de Prismal va sobre el cristal y queda
+                // recortada por la forma de la píldora.
+                .then(expandPhysics.modifier)
                 .onSizeChanged { barWidth = it.width }
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
@@ -465,7 +465,7 @@ fun LiquidGlassNavBar(
                 modifier = Modifier
                     .clearAndSetSemantics { }
                     .alpha(0f)
-                    .layerBackdrop(tabsBackdrop)
+                    .prismalGlassLayer(tabsBackdrop)
                     .graphicsLayer { colorFilter = ColorFilter.tint(accent) }
                     .fillMaxSize()
                     .padding(horizontal = SelectorPadding),
@@ -499,22 +499,33 @@ fun LiquidGlassNavBar(
         }
 
         // Botón de búsqueda: mismo cristal que la píldora, encogiéndose a juego.
-        Box(
+        // PrismalGlassButton aporta la presión, la iluminación y el seguimiento
+        // amortiguado del dedo sin cambiar la forma ni el tamaño del botón.
+        PrismalGlassButton(
+            onClick = onSearchClick,
+            backdrop = backdrop,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(searchSize)
-                .then(searchGlass)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            searchPressed = true
-                            tryAwaitRelease()
-                            searchPressed = false
-                        },
-                        onTap = { onSearchClick() },
-                    )
-                },
-            contentAlignment = Alignment.Center,
+                .size(searchSize),
+            height = null,
+            shape = { barShape },
+            effects = {
+                applyPrismalGlassEffects(
+                    density = this,
+                    adaptiveLuminance = false,
+                    luminance = 0.5f,
+                    blurRadiusPx = 4.dp.toPx(),
+                    refractionHeightPx = 16.dp.toPx(),
+                    refractionAmountPx = 32.dp.toPx(),
+                    useVibrancy = true,
+                )
+            },
+            specular = { PrismalSpecular.Default },
+            depthShadow = null,
+            surfaceColor = surfaceColor,
+            // La misma escala de presión que el resto de botones Prismal.
+            pressLift = 4.dp,
+            contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.Search,
@@ -532,16 +543,25 @@ fun LiquidGlassNavBar(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
+                .prismalButtonScale(
+                    physics = expandPhysics,
+                    pressLift = 4.dp,
+                )
                 .size(LiquidNavBarCollapsedSize)
                 .zIndex(3f)
                 .graphicsLayer { alpha = ((collapse - .35f) / .45f).coerceIn(0f, 1f) }
                 .then(
                     if (collapse > .45f) {
-                        Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = onExpandBottomArea,
-                        )
+                        Modifier
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onExpandBottomArea,
+                            )
+                            // Sólo el gesto: la iluminación se dibuja sobre la
+                            // píldora de cristal para que el material también
+                            // se deforme con la física de Prismal.
+                            .then(expandPhysics.gestureModifier)
                     } else {
                         Modifier
                     },

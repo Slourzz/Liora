@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
-import com.kyant.backdrop.Backdrop
+import com.styropyr0.prismal.PrismalBackdrop
 import dev.chrisbanes.haze.HazeState
 
 /**
@@ -22,7 +22,7 @@ import dev.chrisbanes.haze.HazeState
 fun GlassTopBar(
     title: String,
     liquidGlass: Boolean,
-    backdrop: Backdrop,
+    backdrop: PrismalBackdrop,
     hazeState: HazeState,
     modifier: Modifier = Modifier,
     navigationIcon: (@Composable () -> Unit)? = null,

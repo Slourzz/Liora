@@ -10,6 +10,7 @@
 .cxx
 /app/build/
 /app/release/
+/prismal/build/
 *.apk
 *.aab
 
@@ -24,3 +25,6 @@ gradle-build.log
 *.jks
 *.keystore
 keystore.properties
+
+# Capturas propias de la maquina
+/liora_*.png

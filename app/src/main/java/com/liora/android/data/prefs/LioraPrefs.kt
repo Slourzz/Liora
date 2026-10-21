@@ -1,6 +1,7 @@
 package com.liora.android.data.prefs
 
 import android.content.Context
+import com.liora.android.data.lyrics.TranslationLanguages
 
 /**
  * Preferencias locales de Liora (SharedPreferences, sin dependencias extra).
@@ -36,6 +37,70 @@ class LioraPrefs(context: Context) {
             return AppThemeMode.entries.firstOrNull { it.name == saved } ?: AppThemeMode.System
         }
         set(value) = prefs.edit().putString(KEY_APP_THEME_MODE, value.name).apply()
+
+    /** Fondo del reproductor completo: el campo vivo de kawarp o un color. */
+    var playerBackground: PlayerBackground
+        get() {
+            val saved = prefs.getString(KEY_PLAYER_BACKGROUND, null)
+            return PlayerBackground.entries.firstOrNull { it.name == saved }
+                ?: PlayerBackground.Kawarp
+        }
+        set(value) = prefs.edit().putString(KEY_PLAYER_BACKGROUND, value.name).apply()
+
+    /**
+     * Modo de lectura de las letras.
+     *
+     * En [wordByWord] cada palabra se enciende cuando empieza su tiempo; si la
+     * fuente solo trae tiempos por línea, Lyra cae sola al modo por línea.
+     */
+    var lyricsWordByWord: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_WORD_BY_WORD, true)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS_WORD_BY_WORD, value).apply()
+
+    /**
+     * Nivel de animación de las letras de Lyra.
+     *
+     * - [LyricAnimationLevel.Simple]: letras planas ligadas a la línea y puntos
+     *   de espera de AMLL (respiración y encendido secuencial).
+     * - [LyricAnimationLevel.Normal]: palabra a palabra con muelle, tal como
+     *   está desde que existe Lyra.
+     * - [LyricAnimationLevel.Exaggerated]: motora de spicy-lyrics recreada con
+     *   primitivas nativas: muestreo por letras, splits que se abren con física
+     *   y brillo sobre la palabra que suena.
+     */
+    var lyricsAnimationLevel: LyricAnimationLevel
+        get() {
+            val saved = prefs.getString(KEY_LYRICS_ANIMATION_LEVEL, null)
+            return LyricAnimationLevel.entries.firstOrNull { it.name == saved }
+                ?: LyricAnimationLevel.Normal
+        }
+        set(value) = prefs.edit().putString(KEY_LYRICS_ANIMATION_LEVEL, value.name).apply()
+
+    /** Muestra la romanización bajo la letra original cuando la fuente la trae. */
+    var lyricsShowRomanization: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_SHOW_ROMANIZATION, false)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS_SHOW_ROMANIZATION, value).apply()
+
+    /** Muestra la traducción bajo la letra original cuando la fuente la trae. */
+    var lyricsShowTranslation: Boolean
+        get() = prefs.getBoolean(KEY_LYRICS_SHOW_TRANSLATION, false)
+        set(value) = prefs.edit().putBoolean(KEY_LYRICS_SHOW_TRANSLATION, value).apply()
+
+    /**
+     * Idioma al que se traduce la letra en el teléfono cuando la fuente no trae
+     * traducción.
+     *
+     * Ahora es el de la app, el español. Cuando llegue el selector global de
+     * idioma de Liora, será ese selector quien lo sincronice con aquí.
+     */
+    var lyricsTranslationLanguage: String
+        get() = prefs.getString(
+            KEY_LYRICS_TRANSLATION_LANGUAGE,
+            TranslationLanguages.DEFAULT,
+        ) ?: TranslationLanguages.DEFAULT
+        set(value) = prefs.edit()
+            .putString(KEY_LYRICS_TRANSLATION_LANGUAGE, value)
+            .apply()
 
     /**
      * Carpetas de audio que Liora no debe mostrar ni reproducir. Se guardan por
@@ -95,6 +160,12 @@ class LioraPrefs(context: Context) {
 
         private const val KEY_APP_STYLE = "app_style"
         private const val KEY_APP_THEME_MODE = "app_theme_mode"
+        private const val KEY_PLAYER_BACKGROUND = "player_background"
+        private const val KEY_LYRICS_WORD_BY_WORD = "lyrics_word_by_word"
+        private const val KEY_LYRICS_ANIMATION_LEVEL = "lyrics_animation_level"
+        private const val KEY_LYRICS_SHOW_ROMANIZATION = "lyrics_show_romanization"
+        private const val KEY_LYRICS_SHOW_TRANSLATION = "lyrics_show_translation"
+        private const val KEY_LYRICS_TRANSLATION_LANGUAGE = "lyrics_translation_language"
 
         /** Clave del antiguo interruptor; se lee solo para migrar el estilo. */
         private const val KEY_LIQUID_GLASS = "liquid_glass"
@@ -121,3 +192,23 @@ enum class AppStyle { Material, Dynamic, Glass }
 
 /** Modo de tema elegido por quien usa la app. */
 enum class AppThemeMode { System, Light, Dark }
+
+/**
+ * Fondo del reproductor completo.
+ *
+ * - [Kawarp]: la portada hecha manchas de color, meciéndose despacio con el
+ *   warp de kawarp mientras suena la música.
+ * - [Solid]: un único color sacado de la portada, sin degradado y sin gastar
+ *   ni un fotograma.
+ */
+enum class PlayerBackground { Kawarp, Solid }
+
+/**
+ * Nivel de animación de las letras, en orden de intensidad. El orden también es
+ * el de los pasos del slider de Ajustes (0 = Simple, 2 = Exagerada).
+ */
+enum class LyricAnimationLevel {
+    Simple,
+    Normal,
+    Exaggerated,
+}

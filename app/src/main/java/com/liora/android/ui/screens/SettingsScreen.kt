@@ -37,6 +37,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -60,11 +61,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.styropyr0.prismal.components.PrismalGlassSlider
+import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.liora.android.data.model.AudioFolder
 import com.liora.android.data.prefs.AppStyle
 import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
+import com.liora.android.data.prefs.LyricAnimationLevel
+import com.liora.android.data.prefs.PlayerBackground
 import com.liora.android.ui.components.GlassSwitch
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.LioraSnackbarHost
@@ -73,6 +77,7 @@ import com.liora.android.ui.icons.IconStyle
 import com.liora.android.ui.icons.LauncherIconManager
 import com.liora.android.ui.viewmodel.MusicViewModel
 import dev.chrisbanes.haze.HazeState
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 private const val REPOSITORY_URL = "https://github.com/Slourzz/Liora"
@@ -86,7 +91,12 @@ fun SettingsScreen(
     themeMode: AppThemeMode,
     onAppStyleChange: (AppStyle) -> Unit,
     onThemeModeChange: (AppThemeMode) -> Unit,
-    backdrop: LayerBackdrop,
+    backgroundStyle: PlayerBackground,
+    onBackgroundStyleChange: (PlayerBackground) -> Unit,
+    /** Nivel de animación de las letras: Simple, Normal o Exagerada. */
+    lyricsAnimationLevel: LyricAnimationLevel,
+    onLyricsAnimationLevelChange: (LyricAnimationLevel) -> Unit,
+    backdrop: PrismalGlassLayer,
     hazeState: HazeState,
     bottomPadding: Dp,
     collapseConnection: NestedScrollConnection,
@@ -98,13 +108,16 @@ fun SettingsScreen(
     var showIconPicker by remember { mutableStateOf(false) }
     var showFolderPicker by remember { mutableStateOf(false) }
     var showCacheDialog by remember { mutableStateOf(false) }
+    var showStoredLyricsDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showBackgroundDialog by remember { mutableStateOf(false) }
 
     val folders by viewModel.folders.collectAsState()
     val excludedFolders by viewModel.excludedFolders.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val cacheMaxMb by viewModel.cacheMaxMb.collectAsState()
     val cacheBytes by viewModel.cacheBytes.collectAsState()
+    val storedLyricsCount by viewModel.storedLyricsCount.collectAsState()
     val filterSystemSounds by viewModel.filterSystemSounds.collectAsState()
 
     val versionName = remember {
@@ -115,10 +128,12 @@ fun SettingsScreen(
     }
 
     BackHandler(
-        enabled = showIconPicker || showFolderPicker || showCacheDialog || showThemeDialog,
+        enabled = showIconPicker || showFolderPicker || showCacheDialog || showThemeDialog ||
+            showBackgroundDialog,
     ) {
         when {
             showThemeDialog -> showThemeDialog = false
+            showBackgroundDialog -> showBackgroundDialog = false
             showCacheDialog -> showCacheDialog = false
             else -> {
                 showIconPicker = false
@@ -183,12 +198,25 @@ fun SettingsScreen(
                     onOpenThemePicker = { showThemeDialog = true },
                 )
 
+                PlayerDesignSection(
+                    backgroundStyle = backgroundStyle,
+                    onOpenBackgroundPicker = { showBackgroundDialog = true },
+                )
+
+                LyricsSection(
+                    animationLevel = lyricsAnimationLevel,
+                    liquidGlass = liquidGlass,
+                    backdrop = backdrop,
+                    onLevelChange = onLyricsAnimationLevelChange,
+                )
+
                 StorageSection(
                     activeFolders = folders.count { it.path !in excludedFolders },
                     totalFolders = folders.size,
                     filterSystemSounds = filterSystemSounds,
                     cacheUsageLabel = Formatter.formatShortFileSize(context, cacheBytes),
                     cacheMaxMb = cacheMaxMb,
+                    storedLyricsCount = storedLyricsCount,
                     isScanning = isScanning,
                     liquidGlass = liquidGlass,
                     onOpenFolderPicker = { showFolderPicker = true },
@@ -207,6 +235,7 @@ fun SettingsScreen(
                         }
                     },
                     onOpenCachePicker = { showCacheDialog = true },
+                    onOpenStoredLyrics = { showStoredLyricsDialog = true },
                 )
 
                 AboutSection(
@@ -267,6 +296,37 @@ fun SettingsScreen(
             )
         }
 
+        if (showStoredLyricsDialog) {
+            AlertDialog(
+                onDismissRequest = { showStoredLyricsDialog = false },
+                title = { Text("Borrar las letras guardadas") },
+                text = {
+                    Text(
+                        "Se borrarán las letras de $storedLyricsCount canciones. " +
+                            "La próxima vez que suenen, se buscarán otra vez.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.clearStoredLyrics()
+                            showStoredLyricsDialog = false
+                            scope.launch {
+                                snackbarHostState.showSnackbar("Letras guardadas borradas")
+                            }
+                        },
+                    ) {
+                        Text("Borrar")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showStoredLyricsDialog = false }) {
+                        Text("Cancelar")
+                    }
+                },
+            )
+        }
+
         if (showThemeDialog) {
             ThemeModeDialog(
                 current = themeMode,
@@ -278,6 +338,20 @@ fun SettingsScreen(
                     }
                 },
                 onDismiss = { showThemeDialog = false },
+            )
+        }
+
+        if (showBackgroundDialog) {
+            BackgroundStyleDialog(
+                current = backgroundStyle,
+                onSelect = { style ->
+                    onBackgroundStyleChange(style)
+                    showBackgroundDialog = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Fondo: ${backgroundStyleLabel(style)}")
+                    }
+                },
+                onDismiss = { showBackgroundDialog = false },
             )
         }
     }
@@ -398,6 +472,128 @@ private fun themeModeLabel(mode: AppThemeMode): String = when (mode) {
     AppThemeMode.Dark -> "Oscuro"
 }
 
+/** Nombre visible de cada fondo del reproductor. */
+private fun backgroundStyleLabel(style: PlayerBackground): String = when (style) {
+    PlayerBackground.Kawarp -> "Kawarp"
+    PlayerBackground.Solid -> "Sólido"
+}
+
+/** Explicación corta de cada fondo del reproductor. */
+private fun backgroundStyleDescription(style: PlayerBackground): String = when (style) {
+    PlayerBackground.Kawarp ->
+        "La portada hecha manchas de color, meciéndose despacio mientras suena " +
+            "la música."
+    PlayerBackground.Solid ->
+        "Un único color sacado de la portada, sin degradado ni movimiento."
+}
+
+/**
+ * Sección "Diseño del reproductor": cómo se viste el reproductor completo.
+ */
+@Composable
+private fun PlayerDesignSection(
+    backgroundStyle: PlayerBackground,
+    onOpenBackgroundPicker: () -> Unit,
+) {
+    SettingsSection(title = "Diseño del reproductor") {
+        ListItem(
+            headlineContent = { Text("Estilo del fondo") },
+            supportingContent = { Text(backgroundStyleLabel(backgroundStyle)) },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(onClick = onOpenBackgroundPicker),
+        )
+    }
+}
+
+/** Nombre en español de cada nivel de animación de las letras. */
+private fun lyricsAnimationLabel(level: LyricAnimationLevel): String = when (level) {
+    LyricAnimationLevel.Simple -> "Simple"
+
+    LyricAnimationLevel.Normal -> "Normal"
+
+    LyricAnimationLevel.Exaggerated -> "Exagerada"
+}
+
+@Composable
+private fun LyricsSection(
+    animationLevel: LyricAnimationLevel,
+    liquidGlass: Boolean,
+    backdrop: PrismalGlassLayer,
+    onLevelChange: (LyricAnimationLevel) -> Unit,
+) {
+    /*
+     * El slider tiene 3 paradas —Simple, Normal, Exagerada—, en el orden
+     * natural del nivel: 0 apaga la ola, 2 la dispara con todo. Solo el
+     * estilo Glass lleva el material de Prismal; el resto usa el Slider
+     * de Material sin ruido.
+     */
+    SettingsSection(title = "Letras") {
+        ListItem(
+            headlineContent = { Text("Animación de letras") },
+            supportingContent = {
+                Column {
+                    Text(lyricsAnimationLabel(animationLevel))
+
+                    if (liquidGlass) {
+                        PrismalGlassSlider(
+                            value = { animationLevel.ordinal.toFloat() },
+                            onValueChange = { value ->
+                                val level = LyricAnimationLevel
+                                    .entries[value.roundToInt()]
+                                    .coerceIn(
+                                        LyricAnimationLevel.Simple,
+                                        LyricAnimationLevel.Exaggerated,
+                                    )
+
+                                if (level != animationLevel) {
+                                    onLevelChange(level)
+                                }
+                            },
+                            valueRange = 0f..2f,
+                            visibilityThreshold = 0.25f,
+                            backdrop = backdrop,
+                            stops = listOf(0f, 1f, 2f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 6.dp),
+                        )
+                    } else {
+                        Slider(
+                            value = animationLevel.ordinal.toFloat(),
+                            onValueChange = { value ->
+                                val level = LyricAnimationLevel
+                                    .entries[value.roundToInt()]
+                                    .coerceIn(
+                                        LyricAnimationLevel.Simple,
+                                        LyricAnimationLevel.Exaggerated,
+                                    )
+
+                                if (level != animationLevel) {
+                                    onLevelChange(level)
+                                }
+                            },
+                            valueRange = 0f..2f,
+                            steps = 1,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier.clip(SectionShape),
+        )
+    }
+}
+
 @Composable
 private fun StorageSection(
     activeFolders: Int,
@@ -405,12 +601,14 @@ private fun StorageSection(
     filterSystemSounds: Boolean,
     cacheUsageLabel: String,
     cacheMaxMb: Int,
+    storedLyricsCount: Int,
     isScanning: Boolean,
     liquidGlass: Boolean,
     onOpenFolderPicker: () -> Unit,
     onFilterSystemSoundsChange: (Boolean) -> Unit,
     onRescan: () -> Unit,
     onOpenCachePicker: () -> Unit,
+    onOpenStoredLyrics: () -> Unit,
 ) {
     SettingsSection(title = "Almacenamiento") {
         ListItem(
@@ -526,6 +724,36 @@ private fun StorageSection(
             modifier = Modifier
                 .clip(SectionShape)
                 .clickable(onClick = onOpenCachePicker),
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+
+        ListItem(
+            headlineContent = { Text("Letras guardadas") },
+            supportingContent = {
+                Text(
+                    if (storedLyricsCount == 0) {
+                        "Todavía no hay ninguna letra guardada"
+                    } else {
+                        "$storedLyricsCount canciones con su letra · " +
+                            "Toca para borrarlas"
+                    },
+                )
+            },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(enabled = storedLyricsCount > 0, onClick = onOpenStoredLyrics),
         )
     }
 }
@@ -694,6 +922,58 @@ private fun ThemeModeDialog(
                             text = themeModeLabel(mode),
                             style = MaterialTheme.typography.bodyLarge,
                         )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Listo") }
+        },
+    )
+}
+
+/** Selector del fondo del reproductor: el campo vivo o un único color. */
+@Composable
+private fun BackgroundStyleDialog(
+    current: PlayerBackground,
+    onSelect: (PlayerBackground) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Estilo del fondo") },
+        text = {
+            Column {
+                Text(
+                    text = "Elige qué se ve detrás de la portada en el reproductor.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                PlayerBackground.entries.forEach { style ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onSelect(style) }
+                            .padding(vertical = 2.dp),
+                    ) {
+                        RadioButton(
+                            selected = style == current,
+                            onClick = { onSelect(style) },
+                        )
+                        Column(modifier = Modifier.padding(start = 4.dp)) {
+                            Text(
+                                text = backgroundStyleLabel(style),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                text = backgroundStyleDescription(style),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

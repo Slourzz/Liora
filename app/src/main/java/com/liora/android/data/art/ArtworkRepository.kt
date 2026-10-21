@@ -40,29 +40,9 @@ object ArtworkRepository {
     /** Tamaño con el que se entrega una portada para mostrarla. */
     private const val DISPLAY_PX = 512
 
-    /** Lado de la nube atmosférica: la porción de portada de la que se parte. */
-    private const val WASH_GRID = 26
-
-    /** Luz media (0-255) a la que se nivela la nube, venga de donde venga. */
-    private const val WASH_LUMA = 148.0
-
-    /** Cuánto se intensifica la saturación de la portada en la nube. */
-    private const val WASH_SATURATION = 1.30f
-
-    /** Cuánto se intensifica el contraste de la portada en la nube. */
-    private const val WASH_CONTRAST = 1.10f
-
-    /** Cuánto se funde cada píxel con el tinte de la portada. */
-    private const val WASH_TINT = 0.45f
-
-    /** Diferencia mínima entre canales para que un píxel cuente como color. */
-    private const val WASH_TINT_SPREAD = 0.12f
-
-    /** Luz a partir de la cual las luces se frenan. */
-    private const val WASH_KNEE = 0.62f
-
-    /** Cuánto se frenan las luces por encima de [WASH_KNEE]. */
-    private const val WASH_ROLL = 0.375f
+    /** Cuánto tiene que votar el segundo tono, y cuánto distar del primero. */
+    private const val SECOND_WEIGHT = 0.20f
+    private const val SECOND_HUE_GAP = 30f
 
     /** Calidad que se le pide a iTunes para la portada. */
     private const val HD_QUALITY = "600x600bb"
@@ -78,9 +58,6 @@ object ArtworkRepository {
 
     /** Colores ya sacados, por artista y álbum. */
     private val seeds = LruCache<String, Color>(24)
-
-    /** Lavados ambientales ya pintados, por artista y álbum. */
-    private val washes = LruCache<String, Bitmap>(24)
 
     /** Portadas listas para pintar, por canción y tamaño. */
     private val displays = LruCache<String, Bitmap>(32)
@@ -129,130 +106,6 @@ object ArtworkRepository {
         }
         seeds.put(key, color ?: NoSeed)
         color
-    }
-
-    /**
-     * Lavado del fondo del reproductor: la portada reducida a una rejilla
-     * diminuta —que al estirarse queda suave, como una mancha de luz—, con la
-     * saturación rebajada y la luz media nivelada, de modo que cualquier
-     * portada, clara u oscura, deje un fondo sereno parecido al de Apple Music.
-     * Se pinta una sola vez por portada y se guarda en memoria.
-     */
-    suspend fun atmosphereWash(context: Context, song: Song?): Bitmap? =
-        withContext(Dispatchers.IO) {
-            if (song == null) return@withContext null
-
-            val key = artKey(song)
-            washes.get(key)?.let { return@withContext it }
-
-            val source = artwork(context, song, SEED_PX) ?: return@withContext null
-            val wash = try {
-                buildWash(source)
-            } finally {
-                source.recycle()
-            }
-            washes.put(key, wash)
-            wash
-        }
-
-    /**
-     * El mismo lavado, pero solo si ya está pintado (acceso sin suspender):
-     * sirve para que el reproductor nazca con él desde su primer fotograma.
-     */
-    fun cachedAtmosphereWash(song: Song?): Bitmap? {
-        if (song == null) return null
-        return washes.get(artKey(song))
-    }
-
-    /**
-     * Reduce la portada a [WASH_GRID], le enciende el color y la funde con su
-     * propio tinte —la media de los píxeles con color, la paleta que saca
-     * Apple— para que hasta los blancos hereden el tono de la portada. Las
-     * luces se frenan y la luz media se nivela hacia [WASH_LUMA]: así el fondo
-     * no depende de si la portada era luminosa, sombría o casi blanca.
-     */
-    private fun buildWash(source: Bitmap): Bitmap {
-        val grid = WASH_GRID
-        val scaled = Bitmap.createScaledBitmap(source, grid, grid, true)
-        val pixels = IntArray(grid * grid)
-        scaled.getPixels(pixels, 0, grid, 0, 0, grid, grid)
-        if (scaled !== source) scaled.recycle()
-
-        // 1. Color más vivo que el de la portada: saturación y contraste.
-        val boosted = FloatArray(pixels.size * 3)
-        for (index in pixels.indices) {
-            val pixel = pixels[index]
-            val red = ((pixel shr 16) and 0xFF) / 255f
-            val green = ((pixel shr 8) and 0xFF) / 255f
-            val blue = (pixel and 0xFF) / 255f
-            val gray = 0.299f * red + 0.587f * green + 0.114f * blue
-
-            boosted[index * 3] = (gray + (red - gray) * WASH_SATURATION - 0.5f) * WASH_CONTRAST + 0.5f
-            boosted[index * 3 + 1] = (gray + (green - gray) * WASH_SATURATION - 0.5f) * WASH_CONTRAST + 0.5f
-            boosted[index * 3 + 2] = (gray + (blue - gray) * WASH_SATURATION - 0.5f) * WASH_CONTRAST + 0.5f
-        }
-
-        // 2. Tinte de la portada: la media de los píxeles que tienen color.
-        var tintRed = 0.0
-        var tintGreen = 0.0
-        var tintBlue = 0.0
-        var tintCount = 0
-        for (index in pixels.indices) {
-            val red = boosted[index * 3]
-            val green = boosted[index * 3 + 1]
-            val blue = boosted[index * 3 + 2]
-            val luma = 0.2126f * red + 0.7152f * green + 0.0722f * blue
-            val spread = maxOf(red, green, blue) - minOf(red, green, blue)
-            if (spread > WASH_TINT_SPREAD && luma > 0.10f && luma < 0.92f) {
-                tintRed += red
-                tintGreen += green
-                tintBlue += blue
-                tintCount++
-            }
-        }
-        val mixRed = if (tintCount > 0) (tintRed / tintCount).toFloat() else 0f
-        val mixGreen = if (tintCount > 0) (tintGreen / tintCount).toFloat() else 0f
-        val mixBlue = if (tintCount > 0) (tintBlue / tintCount).toFloat() else 0f
-
-        // 3. Cada píxel se funde con el tinte, las luces se frenan —para que
-        //    ningún blanco reviente— y la luz media se nivela.
-        var sum = 0.0
-        for (index in pixels.indices) {
-            var red = boosted[index * 3]
-            var green = boosted[index * 3 + 1]
-            var blue = boosted[index * 3 + 2]
-            if (tintCount > 0) {
-                red += (mixRed - red) * WASH_TINT
-                green += (mixGreen - green) * WASH_TINT
-                blue += (mixBlue - blue) * WASH_TINT
-            }
-
-            var luma = 0.2126f * red + 0.7152f * green + 0.0722f * blue
-            if (luma > WASH_KNEE) {
-                val roll = (WASH_KNEE + (luma - WASH_KNEE) * WASH_ROLL) / luma
-                red *= roll
-                green *= roll
-                blue *= roll
-                luma *= roll
-            }
-            boosted[index * 3] = red
-            boosted[index * 3 + 1] = green
-            boosted[index * 3 + 2] = blue
-            sum += luma
-        }
-
-        val mean = sum / pixels.size
-        val gain = if (mean < 0.01) 1.0 else (WASH_LUMA / 255.0 / mean).coerceIn(0.6, 1.5)
-        for (index in pixels.indices) {
-            val r = (boosted[index * 3] * gain * 255f).toInt().coerceIn(0, 255)
-            val g = (boosted[index * 3 + 1] * gain * 255f).toInt().coerceIn(0, 255)
-            val b = (boosted[index * 3 + 2] * gain * 255f).toInt().coerceIn(0, 255)
-            pixels[index] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-
-        val wash = Bitmap.createBitmap(grid, grid, Bitmap.Config.ARGB_8888)
-        wash.setPixels(pixels, 0, grid, 0, 0, grid, grid)
-        return wash
     }
 
     // ---------------------------------------------------------------- portadas
@@ -372,10 +225,13 @@ object ArtworkRepository {
     // ------------------------------------------------------------------ color
 
     /**
-     * Tono con más presencia de la portada: cada píxel vota en su franja de
-     * tono con un peso que premia la saturación y castiga los brillos extremos.
+     * Los dos colores con más presencia de la portada: cada píxel vota en su
+     * franja de tono con un peso que premia la saturación y castiga los
+     * brillos extremos, y se quedan las dos franjas más votadas que no se
+     * pisen entre sí. Puede haber un solo color (portadas de una sola
+     * familia).
      */
-    private fun dominantColor(bitmap: Bitmap): Color? {
+    private fun dominantColors(bitmap: Bitmap): Pair<Color, Color?>? {
         val stepX = max(1, bitmap.width / 64)
         val stepY = max(1, bitmap.height / 64)
 
@@ -416,13 +272,55 @@ object ArtworkRepository {
         }
 
         val best = weight.indices.maxByOrNull { weight[it] } ?: return null
-        val total = weight[best]
-        if (total <= 0f) return null
+        val first = bucketColor(best, weight, sumRed, sumGreen, sumBlue) ?: return null
 
-        val red = (sumRed[best] / total).roundToInt()
-        val green = (sumGreen[best] / total).roundToInt()
-        val blue = (sumBlue[best] / total).roundToInt()
-        ColorUtils.RGBToHSL(red, green, blue, hsl)
+        // El segundo tono: la franja con más voto que no se parezca a la
+        // primera ni sea un simple rastro.
+        val second = weight.indices
+            .filter { it != best }
+            .filter { weight[it] >= weight[best] * SECOND_WEIGHT }
+            .filter { hueGap(it, best) >= SECOND_HUE_GAP }
+            .maxByOrNull { weight[it] }
+        return first to second?.let { bucketColor(it, weight, sumRed, sumGreen, sumBlue) }
+    }
+
+    /** El color medio de una franja de tono. */
+    private fun bucketColor(
+        index: Int,
+        weight: FloatArray,
+        sumRed: FloatArray,
+        sumGreen: FloatArray,
+        sumBlue: FloatArray,
+    ): Color? {
+        val total = weight[index]
+        if (total <= 0f) return null
+        return Color(
+            (sumRed[index] / total).roundToInt(),
+            (sumGreen[index] / total).roundToInt(),
+            (sumBlue[index] / total).roundToInt(),
+        )
+    }
+
+    /** Cuánto se llevan dos franjas de tono, en grados, por el lado corto. */
+    private fun hueGap(first: Int, second: Int): Float {
+        val raw = abs(first - second) * 30f
+        return raw.coerceAtMost(360f - raw)
+    }
+
+    /**
+     * Tono con más presencia de la portada, ya empujado para el tema de la
+     * app.
+     */
+    private fun dominantColor(bitmap: Bitmap): Color? {
+        val (best, _) = dominantColors(bitmap) ?: return null
+
+        val hsl = FloatArray(3)
+        ColorUtils.RGBToHSL(
+            (best.red * 255f).roundToInt(),
+            (best.green * 255f).roundToInt(),
+            (best.blue * 255f).roundToInt(),
+            hsl,
+        )
 
         // Una portada gris no tiene color que dar: mejor la paleta de Liora.
         if (hsl[1] < 0.08f) return null
@@ -435,7 +333,7 @@ object ArtworkRepository {
 
     // ----------------------------------------------------------------- varios
 
-    private fun artKey(song: Song): String {
+    internal fun artKey(song: Song): String {
         val artist = song.artist.ifBlank { "?" }.trim().lowercase()
         val release = if (song.album.isNotBlank()) song.album else song.title
         return "$artist|${release.trim().lowercase()}"

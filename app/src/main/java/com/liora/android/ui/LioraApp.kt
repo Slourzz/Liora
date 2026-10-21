@@ -49,11 +49,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.zIndex
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.liora.android.data.art.ArtworkRepository
 import com.liora.android.data.prefs.AppStyle
 import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
+import com.liora.android.data.prefs.LyricAnimationLevel
+import com.liora.android.data.prefs.PlayerBackground
 import com.liora.android.ui.components.MiniPlayer
 import com.liora.android.ui.components.MiniPlayerCollapsedHeight
 import com.liora.android.ui.components.MiniPlayerHeight
@@ -68,6 +69,7 @@ import com.liora.android.ui.navigation.LiquidNavBarPadding
 import com.liora.android.ui.navigation.SimpleNavBar
 import com.liora.android.ui.navigation.SimpleNavBarHeight
 import com.liora.android.ui.navigation.navBarSidePadding
+import com.liora.android.ui.player.AtmosphereFields
 import com.liora.android.ui.player.LioraFullPlayer
 import com.liora.android.ui.player.PlayerPanelSpec
 import com.liora.android.ui.screens.HomeScreen
@@ -79,6 +81,8 @@ import com.liora.android.ui.theme.LioraTheme
 import com.liora.android.ui.theme.neutralScheme
 import com.liora.android.ui.theme.rememberDynamicColorScheme
 import com.liora.android.ui.viewmodel.MusicViewModel
+import com.styropyr0.prismal.PrismalGlass
+import com.styropyr0.prismal.sources.rememberPrismalGlassLayer
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
 
@@ -112,6 +116,8 @@ fun LioraApp(
 
     var appStyle by remember { mutableStateOf(prefs.appStyle) }
     var themeMode by remember { mutableStateOf(prefs.appThemeMode) }
+    var backgroundStyle by remember { mutableStateOf(prefs.playerBackground) }
+    var lyricsAnimationLevel by remember { mutableStateOf(prefs.lyricsAnimationLevel) }
 
     // La canción actual decide la paleta del estilo Dinámico.
     val currentSong by viewModel.currentSong.collectAsState()
@@ -149,6 +155,16 @@ fun LioraApp(
                 themeMode = mode
                 prefs.appThemeMode = mode
             },
+            backgroundStyle = backgroundStyle,
+            onBackgroundStyleChange = { style ->
+                backgroundStyle = style
+                prefs.playerBackground = style
+            },
+            lyricsAnimationLevel = lyricsAnimationLevel,
+            onLyricsAnimationLevelChange = { level ->
+                lyricsAnimationLevel = level
+                prefs.lyricsAnimationLevel = level
+            },
         )
     }
 }
@@ -172,10 +188,16 @@ private fun LioraAppContent(
     themeMode: AppThemeMode,
     onAppStyleChange: (AppStyle) -> Unit,
     onThemeModeChange: (AppThemeMode) -> Unit,
+    backgroundStyle: PlayerBackground,
+    onBackgroundStyleChange: (PlayerBackground) -> Unit,
+    /** Nivel de animación de las letras que los dos consumidores comparten. */
+    lyricsAnimationLevel: LyricAnimationLevel,
+    onLyricsAnimationLevelChange: (LyricAnimationLevel) -> Unit,
 ) {
     // Solo el estilo Glass usa el cristal líquido; Material You y Dinámico se
-    // quedan con la navegación simple.
-    val liquidGlass = appStyle == AppStyle.Glass
+    // quedan con la navegación simple. Prismal necesita API 25 o superior:
+    // en Android 7.0 el estilo Glass conserva la navegación simple con Haze.
+    val liquidGlass = appStyle == AppStyle.Glass && PrismalGlass.isSupported()
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -184,18 +206,27 @@ private fun LioraAppContent(
 
     val hazeState = rememberHazeState()
     val backgroundColor = MaterialTheme.colorScheme.background
-    val backdrop = rememberLayerBackdrop {
+    val backdrop = rememberPrismalGlassLayer {
         drawRect(backgroundColor)
         drawContent()
     }
 
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    // La intención de sonar: el botón la mira, porque mientras la canción
+    // carga todavía no suena pero va a sonar.
+    val playWhenReady by viewModel.playWhenReady.collectAsState()
     val playbackProgress by viewModel.progress.collectAsState()
     val neighbors by viewModel.neighbors.collectAsState()
     val queueSongs by viewModel.queueSongs.collectAsState()
     val shuffleEnabled by viewModel.shuffleEnabled.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
+    val lyrics by viewModel.lyrics.collectAsState()
+    val lyricsLoading by viewModel.lyricsLoading.collectAsState()
+    val lyricsAttribution by viewModel.lyricsAttribution.collectAsState()
+    val lyricsTranslation by viewModel.lyricsTranslation.collectAsState()
+    val lyricsTranslationVisible by viewModel.lyricsTranslationVisible.collectAsState()
+    val translationError by viewModel.translationError.collectAsState()
 
     /** Altura a la que reposa la barra del mini reproductor, en píxeles. */
     var miniTopPx by remember { mutableStateOf(0f) }
@@ -223,11 +254,17 @@ private fun LioraAppContent(
         if (!playerOpen) miniDragging = false
     }
 
-    // El lavado del fondo se prepara mientras la canción suena en el mini
-    // reproductor: así el reproductor completo nace ya con su fondo puesto.
+    // El color de la portada —y, si el fondo es el vivo, su campo con la receta
+    // de kawarp— se preparan mientras la canción suena en el mini reproductor:
+    // así el reproductor completo nace ya con su fondo puesto.
     val context = LocalContext.current
-    LaunchedEffect(currentSong?.id) {
-        currentSong?.let { ArtworkRepository.atmosphereWash(context, it) }
+    LaunchedEffect(currentSong?.id, backgroundStyle) {
+        currentSong?.let {
+            ArtworkRepository.seedColor(context, it)
+            if (backgroundStyle == PlayerBackground.Kawarp) {
+                AtmosphereFields.load(context, it)
+            }
+        }
     }
 
     val tabs = LioraTab.entries
@@ -292,6 +329,10 @@ private fun LioraAppContent(
                     themeMode = themeMode,
                     onAppStyleChange = onAppStyleChange,
                     onThemeModeChange = onThemeModeChange,
+                    backgroundStyle = backgroundStyle,
+                    onBackgroundStyleChange = onBackgroundStyleChange,
+                    lyricsAnimationLevel = lyricsAnimationLevel,
+                    onLyricsAnimationLevelChange = onLyricsAnimationLevelChange,
                     backdrop = backdrop,
                     hazeState = hazeState,
                     bottomPadding = bottomPadding,
@@ -460,7 +501,7 @@ private fun LioraAppContent(
                                 song = song,
                                 previousSong = neighbors.previous,
                                 nextSong = neighbors.next,
-                                isPlaying = isPlaying,
+                                playWhenReady = playWhenReady,
                                 progressFraction = playbackProgress.fraction,
                                 collapseProgress = collapse,
                                 onTogglePlay = { viewModel.togglePlayPause() },
@@ -576,8 +617,19 @@ private fun LioraAppContent(
                         LioraFullPlayer(
                             song = song,
                             isPlaying = isPlaying,
+                            playWhenReady = playWhenReady,
+                            backgroundStyle = backgroundStyle,
                             progress = playbackProgress,
                             queue = queueSongs,
+                            lyrics = lyrics,
+                            lyricsLoading = lyricsLoading,
+                            lyricsAttribution = lyricsAttribution,
+                            lyricsTranslation = lyricsTranslation,
+                            lyricsTranslationVisible = lyricsTranslationVisible,
+                            onToggleLyricsTranslation = viewModel::setLyricsTranslationVisible,
+                            translationError = translationError,
+                            onDismissTranslationError = viewModel::dismissTranslationError,
+                            lyricsAnimationLevel = lyricsAnimationLevel,
                             shuffleEnabled = shuffleEnabled,
                             repeatMode = repeatMode,
                             onClose = { playerOpen = false },
@@ -593,6 +645,7 @@ private fun LioraAppContent(
                             miniTopPx = miniTopPx,
                             miniArtworkPos = miniArtworkPos,
                             miniArtworkSize = miniArtworkSize,
+                            liquidGlass = liquidGlass,
                         )
                     }
                 }
