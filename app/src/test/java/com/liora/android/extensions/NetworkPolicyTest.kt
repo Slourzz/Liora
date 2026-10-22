@@ -204,6 +204,43 @@ class NetworkPolicyTest {
     }
 
     @Test
+    fun `una respuesta comprimida con gzip se descomprime`() {
+        // Aunque el cliente pida "identity", hay servidores que contestan
+        // comprimidos: el cliente tiene que devolver el texto original.
+        val original = "cancion muy larga ".repeat(500)
+        serve("/comprimido") { exchange ->
+            val compressed = java.io.ByteArrayOutputStream()
+            java.util.zip.GZIPOutputStream(compressed).use { it.write(original.toByteArray()) }
+            val bytes = compressed.toByteArray()
+            exchange.responseHeaders.add("Content-Encoding", "gzip")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+
+        val client = UrlConnectionHttpClient()
+        val policy = NetworkPolicy(allowedDomains = listOf("127.0.0.1"), requireHttps = false)
+        val response = runBlocking { client.get("${baseUrl()}/comprimido", policy = policy) }
+
+        assertEquals(200, response.statusCode)
+        assertEquals(original, response.body)
+    }
+
+    @Test
+    fun `la peticion no se pide comprimida`() {
+        // Hay APIs (la de YouTube, entre otras) que responden 400 si la
+        // peticion llega con "Accept-Encoding: gzip".
+        val acceptEncoding = AtomicReference<String?>(null)
+        serve("/peticion") { exchange ->
+            acceptEncoding.set(exchange.requestHeaders.getFirst("Accept-Encoding"))
+            respond(exchange, 200, "ok")
+        }
+        val client = UrlConnectionHttpClient()
+        val policy = NetworkPolicy(allowedDomains = listOf("127.0.0.1"), requireHttps = false)
+        runBlocking { client.get("${baseUrl()}/peticion", policy = policy) }
+        assertEquals("identity", acceptEncoding.get())
+    }
+
+    @Test
     fun `una descarga incompleta se detecta con el tamano declarado`() {
         // El servidor declara mas bytes de los que manda.
         serve("/corto") { exchange ->

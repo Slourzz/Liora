@@ -6,6 +6,7 @@ lifecycleRuntimeKtx = "2.10.0"
 activityCompose = "1.13.0"
 composeBom = "2026.09.00"
 media3 = "1.10.1"
+browser = "1.9.0"
 haze = "2.0.1"
 backdrop = "2.0.1"
 startup = "1.2.0"
@@ -26,6 +27,9 @@ androidx-runtime = { group = "androidx.compose.runtime", name = "runtime" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 androidx-startup-runtime = { group = "androidx.startup", name = "startup-runtime", version.ref = "startup" }
+
+# Chrome Custom Tabs (inicio de sesion dentro de la app)
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
 
 # Jetpack Media3
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }

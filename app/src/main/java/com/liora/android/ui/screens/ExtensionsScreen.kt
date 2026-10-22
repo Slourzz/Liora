@@ -21,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
@@ -181,6 +182,7 @@ fun ExtensionsScreen(
                     )
                 }
                 installed.forEach { entry ->
+                    val manifest = service.manifestOf(entry.extensionId)
                     InstalledRow(
                         name = entry.displayName,
                         version = entry.version,
@@ -188,9 +190,9 @@ fun ExtensionsScreen(
                         enabled = entry.enabled,
                         error = entry.error,
                         onConfigure = {
-                            val manifest = service.manifestOf(entry.extensionId)
-                            if (manifest != null && manifest.settings.isNotEmpty()) {
-                                configuring = manifest
+                            val current = service.manifestOf(entry.extensionId)
+                            if (current != null && current.settings.isNotEmpty()) {
+                                configuring = current
                                 settingsDialog = true
                             }
                         },

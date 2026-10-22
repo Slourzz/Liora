@@ -53,6 +53,10 @@ class ProviderRegistry {
     /** Registra (o sustituye) la entrada de una extensión. */
     fun register(entry: ProviderEntry) {
         entries[entry.extensionId] = entry
+        com.liora.android.extensions.ExtLog.i(
+            "Proveedor registrado: ${entry.extensionId} ${entry.version} " +
+                "tipos=${entry.types.joinToString { it.name }} activo=${entry.enabled}",
+        )
     }
 
     /** Quita una extensión del registro. */

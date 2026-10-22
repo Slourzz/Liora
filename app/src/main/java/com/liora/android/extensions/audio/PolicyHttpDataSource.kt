@@ -7,6 +7,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.TransferListener
 import com.liora.android.extensions.net.NetworkPolicy
 import com.liora.android.extensions.net.hostOf
+import com.liora.android.extensions.session.SessionStore
 import java.io.IOException
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -56,6 +57,14 @@ object ProviderSourceRegistry {
  */
 class PolicyHttpDataSource(
     private val policy: NetworkPolicy,
+    /**
+     * Las sesiones de cuenta disponibles.
+     *
+     * Some servers (the video one of YouTube, for example) do not give the
+     * audio to a request that is not signed in: the session has to travel
+     * with the request, and the app is the one that holds it.
+     */
+    private val sessions: SessionStore? = null,
 ) : DataSource {
 
     private var connection: HttpURLConnection? = null
@@ -80,13 +89,16 @@ class PolicyHttpDataSource(
                 // A otro dominio no viajan las cabeceras sensibles.
                 headers.filterKeys { it.lowercase() !in policy.sensitiveHeaders }
             }
+            // La sesion del usuario viaja con la peticion: sin ella, algunos
+            // servidores no sirven el archivo.
+            val withSession = sessionHeaders(currentUrl, sent)
 
             val open = URI(currentUrl).toURL().openConnection() as HttpURLConnection
             open.connectTimeout = CONNECT_TIMEOUT_MS
             open.readTimeout = READ_TIMEOUT_MS
             open.instanceFollowRedirects = false
             open.setRequestProperty("Accept-Encoding", "identity")
-            for ((key, value) in sent) open.setRequestProperty(key, value)
+            for ((key, value) in withSession) open.setRequestProperty(key, value)
 
             val status = open.responseCode
             val location = open.getHeaderField("Location")
@@ -103,6 +115,11 @@ class PolicyHttpDataSource(
             }
 
             if (status !in 200..299) {
+                com.liora.android.extensions.ExtLog.w(
+                    "La fuente de audio respondió $status (${hostOf(currentUrl)}), " +
+                        "con sesión: ${withSession.containsKey("Cookie")}, " +
+                        "cabeceras: ${withSession.keys.joinToString()}",
+                )
                 open.disconnect()
                 throw IOException("La fuente de audio respondió con el código $status")
             }
@@ -123,6 +140,30 @@ class PolicyHttpDataSource(
     }
 
     override fun getUri(): android.net.Uri? = android.net.Uri.parse(currentUrl)
+
+    /**
+     * Las cabeceras con la sesión de cuenta, si la hay para ese dominio.
+     *
+     * La cookie solo se manda a los dominios del servicio con el que se
+     * inició sesión: mandarla a otro sitio sería regalarla.
+     */
+    private fun sessionHeaders(url: String, headers: Map<String, String>): Map<String, String> {
+        val store = sessions ?: return headers
+        val host = hostOf(url)
+        val service = when {
+            host == "music.youtube.com" || host == "youtube.com" ||
+                host == "www.youtube.com" || host == "youtubei.googleapis.com" ||
+                host.endsWith(".googlevideo.com") -> SessionStore.YOUTUBE
+            else -> null
+        } ?: return headers
+        val cookie = store.cookieHeader(service) ?: return headers
+        val result = headers.toMutableMap()
+        result["Cookie"] = cookie
+        store.authorizationHeader(service, "https://music.youtube.com")?.let {
+            result["Authorization"] = it
+        }
+        return result
+    }
 
     override fun getResponseHeaders(): Map<String, List<String>> = responseHeaders
 
@@ -149,17 +190,19 @@ class PolicyHttpDataSource(
 class ProviderDataSourceFactory(
     context: android.content.Context,
     private val policy: NetworkPolicy = NetworkPolicy(),
+    private val sessions: SessionStore? = null,
 ) : DataSource.Factory {
 
     private val defaultFactory = DefaultDataSource.Factory(context)
 
-    override fun createDataSource(): DataSource = ProviderDataSource(policy, defaultFactory)
+    override fun createDataSource(): DataSource = ProviderDataSource(policy, defaultFactory, sessions)
 }
 
 /** Elige entre la fuente normal y la que lleva la política. */
 class ProviderDataSource(
     private val policy: NetworkPolicy,
     private val defaultFactory: DataSource.Factory,
+    private val sessions: SessionStore? = null,
 ) : DataSource {
 
     private var delegate: DataSource? = null
@@ -169,7 +212,7 @@ class ProviderDataSource(
     override fun open(dataSpec: DataSpec): Long {
         val scheme = dataSpec.uri.scheme?.lowercase()
         val chosen: DataSource = if (scheme == "http" || scheme == "https") {
-            PolicyHttpDataSource(policy)
+            PolicyHttpDataSource(policy, sessions)
         } else {
             defaultFactory.createDataSource()
         }

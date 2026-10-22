@@ -51,6 +51,7 @@ dependencies {
     // Jetpack Media3
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.browser)
 
     // Haze: alternativa de desenfoque para el modo simple y para API 24.
     implementation(libs.haze)

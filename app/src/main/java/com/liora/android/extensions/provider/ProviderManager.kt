@@ -31,12 +31,26 @@ class ProviderManager(private val registry: ProviderRegistry) {
         withContext(Dispatchers.IO) {
             val found = mutableListOf<ProviderTrack>()
             val seen = mutableSetOf<String>()
-            for (entry in registry.providers(ProviderType.TRACK_SEARCH)) {
+            val candidates = registry.providers(ProviderType.TRACK_SEARCH)
+            com.liora.android.extensions.ExtLog.i(
+                "Buscando '$query' en ${candidates.size} proveedores: " +
+                    candidates.joinToString { it.extensionId },
+            )
+            for (entry in candidates) {
                 val tracks = runCatching { entry.runtime.searchTracks(query, limit) }
                     .getOrElse { error ->
+                        com.liora.android.extensions.ExtLog.w(
+                            "El proveedor '${entry.extensionId}' fallo en la busqueda: ${error.message}",
+                            error,
+                        )
                         registry.setError(entry.extensionId, error.message)
                         emptyList()
                     }
+                if (tracks.isEmpty() && entry.error == null) {
+                    com.liora.android.extensions.ExtLog.i(
+                        "El proveedor '${entry.extensionId}' no devolvio nada para '$query'",
+                    )
+                }
                 for (track in tracks) {
                     val key = "${track.providerId}:${track.id}"
                     if (seen.add(key)) found += track
@@ -101,6 +115,24 @@ class ProviderManager(private val registry: ProviderRegistry) {
         val difference = kotlin.math.abs(localMs - candidateMs).toDouble()
         val ratio = difference / maxOf(localMs, candidateMs).toDouble()
         return (ratio * 0.5).coerceAtMost(0.5)
+    }
+
+    /**
+     * La ficha completa de una pista, tal y como la ve el proveedor.
+     *
+     * La busqueda no siempre trae el artista ni el album: la ficha completa
+     * sale del proveedor, que es quien la sabe.
+     */
+    suspend fun trackOf(trackId: String): ProviderTrack? = withContext(Dispatchers.IO) {
+        for (entry in registry.providers(ProviderType.METADATA)) {
+            val track = runCatching { entry.runtime.getTrack(trackId) }
+                .getOrElse { error ->
+                    registry.setError(entry.extensionId, error.message)
+                    null
+                }
+            if (track != null) return@withContext track
+        }
+        null
     }
 
     /**

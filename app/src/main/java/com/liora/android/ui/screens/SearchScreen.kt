@@ -1,6 +1,7 @@
 package com.liora.android.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -23,10 +24,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,16 +46,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.styropyr0.prismal.sources.PrismalGlassLayer
 import com.liora.android.ui.components.GlassTopBar
 import com.liora.android.ui.components.SongRow
@@ -106,6 +116,7 @@ fun SearchScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val providerResults by viewModel.providerResults.collectAsState()
     val providerSearching by viewModel.providerSearching.collectAsState()
+    val downloading by viewModel.downloading.collectAsState()
 
     var query by rememberSaveable { mutableStateOf("") }
     var scope by rememberSaveable { mutableStateOf(SearchScope.LIBRARY) }
@@ -240,7 +251,11 @@ fun SearchScreen(
                                 subtitle = listOf(track.artist, track.album)
                                     .filter { it.isNotBlank() }
                                     .joinToString(" • "),
+                                artworkUrl = track.artworkUrl,
+                                downloading = track.id in downloading,
                                 onClick = { viewModel.playProviderTrack(track) },
+                                onDownload = { viewModel.downloadProviderTrack(track) },
+                                onMore = { viewModel.showProviderOptions(track) },
                             )
                         }
                     }
@@ -422,29 +437,25 @@ private fun SearchField(
 private fun ProviderRow(
     title: String,
     subtitle: String,
+    artworkUrl: String?,
+    downloading: Boolean,
     onClick: () -> Unit,
+    onDownload: () -> Unit,
+    onMore: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(start = 20.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
+        ProviderArtwork(
+            artworkUrl = artworkUrl,
             modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Default.CloudDownload,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-        }
+                .size(46.dp)
+                .clip(RoundedCornerShape(10.dp)),
+        )
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -463,6 +474,78 @@ private fun ProviderRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+        IconButton(onClick = onDownload, enabled = !downloading) {
+            if (downloading) {
+                // Mientras baja, el icono de descarga se convierte en el
+                // circulo de progreso.
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = "Descargar",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+        IconButton(onClick = onMore) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Más opciones",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/**
+ * La portada de una pista de un proveedor.
+ *
+ * La baja la propia app (no la extensión): el proveedor solo dice de dónde
+ * es, y la app se encarga de cogerla y de cachearla.
+ */
+@Composable
+private fun ProviderArtwork(
+    artworkUrl: String?,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    var bitmap by remember(artworkUrl) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(artworkUrl) {
+        bitmap = artworkUrl?.let { url ->
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    ProviderArtworkLoader.load(context, url)?.asImageBitmap()
+                }
+            }.getOrNull()
+        }
+    }
+
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        contentAlignment = Alignment.Center,
+    ) {
+        val image = bitmap
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

@@ -20,6 +20,7 @@ import com.liora.android.extensions.repository.CatalogEntry
 import com.liora.android.extensions.repository.RepositoryManager
 import com.liora.android.extensions.repository.RepositoryStore
 import com.liora.android.extensions.runtime.ExtensionHostApi
+import com.liora.android.extensions.session.SessionStore
 import com.liora.android.extensions.runtime.JsExtensionRuntime
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -76,6 +77,9 @@ class ExtensionsService(
     /** El gestor de descargas de audio. */
     val downloads = DownloadManager(appContext)
 
+    /** Las sesiones de cuenta que el usuario ha iniciado. */
+    val sessions = SessionStore(appContext)
+
     /** El adaptador que traduce las fuentes de los proveedores a Media3. */
     val audio = AudioSourceAdapter(appContext)
 
@@ -112,13 +116,13 @@ class ExtensionsService(
      * falla al arrancar, se instala igual pero se marca con su error, para que
      * el usuario vea qué pasa sin que la app se rompa.
      */
-    suspend fun install(entry: RegistryExtension): ProviderEntry {
+    suspend fun install(entry: RegistryExtension): ProviderEntry = withContext(Dispatchers.IO) {
         val manifest = installer.install(entry)
-        return load(manifest)
+        load(manifest)
     }
 
     /** Quita una extensión y la descarga del registro. */
-    suspend fun uninstall(extensionId: String) {
+    suspend fun uninstall(extensionId: String) = withContext(Dispatchers.IO) {
         registry.find(extensionId)?.runtime?.unload()
         registry.unregister(extensionId)
         installer.remove(extensionId)
@@ -144,16 +148,33 @@ class ExtensionsService(
      * Los ajustes se quedan en la app, no en la extensión: solo se le pasan
      * al inicializarse.
      */
-    suspend fun setExtensionSettings(extensionId: String, values: Map<String, String>) {
-        prefs.extensionSettings = prefs.extensionSettings + (extensionId to values)
-        registry.find(extensionId)?.runtime?.unload()
-        registry.unregister(extensionId)
-        installer.installed().firstOrNull { it.id == extensionId }?.let { load(it) }
-    }
+    suspend fun setExtensionSettings(extensionId: String, values: Map<String, String>) =
+        withContext(Dispatchers.IO) {
+            prefs.extensionSettings = prefs.extensionSettings + (extensionId to values)
+            registry.find(extensionId)?.runtime?.unload()
+            registry.unregister(extensionId)
+            installer.installed().firstOrNull { it.id == extensionId }?.let { load(it) }
+        }
 
     /** Los ajustes que tiene puestos una extensión. */
     fun settingsOf(extensionId: String): Map<String, String> =
         prefs.extensionSettings[extensionId].orEmpty()
+
+    /**
+     * Vuelve a cargar las extensiones que usan la sesión de un servicio.
+     *
+     * La extensión decide en su `initialize` si hay sesión o no, así que
+     * después de iniciar sesión hay que recargarla: si no, sigue creyendo
+     * que no hay ninguna.
+     */
+    suspend fun reloadSessionUsers(service: String) = withContext(Dispatchers.IO) {
+        for (manifest in installer.installed()) {
+            if (!manifest.permissions.allowsSession(service)) continue
+            registry.find(manifest.id)?.runtime?.unload()
+            registry.unregister(manifest.id)
+            load(manifest)
+        }
+    }
 
     /** El manifiesto de una extensión instalada. */
     fun manifestOf(extensionId: String): ExtensionManifest? =
@@ -174,8 +195,16 @@ class ExtensionsService(
         loaded
     }
 
-    /** Carga una extensión concreta y la registra. */
-    private fun load(manifest: ExtensionManifest): ProviderEntry {
+    /**
+     * Carga una extensión concreta y la registra.
+     *
+     * La carga puede tardar (el script se compila y se ejecuta): se hace
+     * siempre fuera del hilo de la interfaz, que si no se congela.
+     */
+    private suspend fun load(manifest: ExtensionManifest): ProviderEntry =
+        withContext(Dispatchers.IO) { loadNow(manifest) }
+
+    private fun loadNow(manifest: ExtensionManifest): ProviderEntry {
         val directory = installer.directoryOf(manifest.id)
         val scriptFile = File(directory, manifest.entrypoint)
         if (!scriptFile.exists()) {
@@ -191,6 +220,7 @@ class ExtensionsService(
                         dataDir = File(appContext.filesDir, "extensiones/datos/${manifest.id}"),
                         manifest = manifest,
                         http = http,
+                        sessions = sessions,
                     ),
                 ),
                 enabled = false,
@@ -207,6 +237,7 @@ class ExtensionsService(
             http = http,
             assetResolver = { name -> resolveAsset(name) },
             logger = { message -> Log.i("LioraExt", message) },
+            sessions = sessions,
             // Carpetas donde la extension puede escribir: la de sus datos, la
             // de los temporales de descarga y la de las descargas ya hechas.
             extraRoots = listOf(

@@ -5,6 +5,7 @@ import com.liora.android.extensions.model.ExtensionManifest
 import com.liora.android.extensions.net.HttpClient
 import com.liora.android.extensions.net.NetworkPolicy
 import com.liora.android.extensions.net.hostOf
+import com.liora.android.extensions.session.SessionStore
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,6 +42,13 @@ class ExtensionHostApi(
      * escribir.
      */
     private val extraRoots: List<File> = emptyList(),
+    /**
+     * Las sesiones de cuenta disponibles.
+     *
+     * La extensión no ve las cookies: la app las añade a la petición cuando
+     * el manifiesto pide esa sesión y el dominio está permitido.
+     */
+    private val sessions: SessionStore? = null,
 ) {
 
     /** El directorio de datos de la extensión: su almacenamiento y sus ficheros. */
@@ -70,7 +78,13 @@ class ExtensionHostApi(
      *   no viajan a un dominio distinto del de origen: lo comprueba el
      *   cliente HTTP en cada salto de una redireccion.
      */
-    fun http(method: String, url: String, body: String?, headers: Map<String, String> = emptyMap()): String {
+    fun http(
+        method: String,
+        url: String,
+        body: String?,
+        headers: Map<String, String> = emptyMap(),
+        useSession: Boolean = false,
+    ): String {
         val host = hostOf(url)
         if (!manifest.permissions.allowsDomain(host)) {
             return error(
@@ -82,13 +96,25 @@ class ExtensionHostApi(
             return error("network_denied", "Solo se permiten peticiones https")
         }
         return try {
+            val started = System.currentTimeMillis()
+            val sent = if (useSession) sessionHeaders(url, headers) else headers
             val response = runBlocking {
                 when (method.uppercase()) {
-                    "GET" -> http.get(url, headers, policy())
-                    "POST" -> http.post(url, body, headers, policy())
+                    "GET" -> http.get(url, sent, policy())
+                    "POST" -> http.post(url, body, sent, policy())
                     else -> null
                 }
             } ?: return error("unsupported", "Método no admitido: $method")
+            com.liora.android.extensions.ExtLog.i(
+                "HTTP ${method.uppercase()} ${hostOf(url)} -> ${response.statusCode} " +
+                    "en ${System.currentTimeMillis() - started} ms " +
+                    "(${response.body.length / 1024} KB)",
+            )
+            if (!response.isSuccessful) {
+                com.liora.android.extensions.ExtLog.w(
+                    "Respuesta ${response.statusCode}: " + response.body.take(300),
+                )
+            }
             JSONObject()
                 .put("statusCode", response.statusCode)
                 .put("body", response.body)
@@ -97,6 +123,53 @@ class ExtensionHostApi(
         } catch (error: Exception) {
             error("network_error", error.message ?: "fallo de red")
         }
+    }
+
+    /**
+     * Las cabeceras de la petición, con la sesión si la extensión la pide.
+     *
+     * La cookie de la sesión la pone la app, no la extensión: el script nunca
+     * ve la sesión, solo la usa. Solo se añade si el manifiesto pide esa
+     * sesión y el dominio de la petición está permitido.
+     */
+    private fun sessionHeaders(url: String, headers: Map<String, String>): Map<String, String> {
+        val store = sessions ?: return headers
+        val host = hostOf(url)
+        val service = manifest.permissions.session.firstOrNull { service ->
+            manifest.permissions.allowsSession(service) && serviceHosts(service, host)
+        } ?: return headers
+        val cookie = store.cookieHeader(service) ?: return headers
+        val result = headers.toMutableMap()
+        result["Cookie"] = cookie
+        // La firma se hace con el origen de la pagina que pide (no con el del
+        // servidor de la API): es lo que espera el servicio.
+        store.authorizationHeader(service, sessionOrigin(service))?.let {
+            result["Authorization"] = it
+            result["Origin"] = sessionOrigin(service)
+            result["X-Goog-AuthUser"] = "0"
+        }
+        return result
+    }
+
+    /** El origen con el que se firma la petición de cada servicio. */
+    private fun sessionOrigin(service: String): String = when (service) {
+        SessionStore.YOUTUBE -> "https://music.youtube.com"
+        else -> "https://$service"
+    }
+
+    /**
+     * ¿El dominio de la petición es uno de los de ese servicio?
+     *
+     * La cookie de una sesión solo se manda a los dominios del servicio que
+     * la ha creado: mandarla a otro sitio sería regalarle la sesión.
+     */
+    private fun serviceHosts(service: String, host: String): Boolean = when (service) {
+        SessionStore.YOUTUBE -> host == "music.youtube.com" ||
+            host == "youtube.com" ||
+            host == "www.youtube.com" ||
+            host == "youtubei.googleapis.com" ||
+            host.endsWith(".googlevideo.com")
+        else -> false
     }
 
     /**
@@ -146,15 +219,33 @@ class ExtensionHostApi(
         logger("[$level] ${manifest.id}: $message")
     }
 
+    // ---------------------------------------------------------------- session
+
+    /**
+     * Si hay una sesión iniciada para este servicio.
+     *
+     * La extensión solo pregunta; la cookie no sale de la app.
+     */
+    fun hasSession(service: String): Boolean {
+        if (!manifest.permissions.allowsSession(service)) return false
+        return sessions?.has(service) == true
+    }
+
     // ----------------------------------------------------------------- files
 
     /**
      * Descarga un fichero a la carpeta de la extensión.
      *
      * El destino está limitado a su directorio: una extensión no puede
-     * escribir fuera de su espacio.
+     * escribir fuera de su espacio. Las cabeceras son las que el proveedor
+     * necesita para que el servidor le entregue el fichero (algunos, como el
+     * de video de YouTube, piden una peticion por rango).
      */
-    fun fileDownload(url: String, targetPath: String): String {
+    fun fileDownload(
+        url: String,
+        targetPath: String,
+        headers: Map<String, String> = emptyMap(),
+    ): String {
         if (!manifest.permissions.file) {
             return error("file_denied", "La extensión '${manifest.id}' no tiene permiso de ficheros")
         }
@@ -191,6 +282,9 @@ class ExtensionHostApi(
                     http.download(
                         url = url,
                         target = output,
+                        // Con la sesion: algunos servidores no sirven el
+                        // archivo a quien no ha iniciado sesion.
+                        headers = sessionHeaders(url, headers),
                         policy = policy(),
                         onProgress = { bytes, total ->
                             written = bytes

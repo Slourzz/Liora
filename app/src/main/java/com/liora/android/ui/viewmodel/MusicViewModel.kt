@@ -14,6 +14,7 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.liora.android.data.cache.PlaybackCache
+import com.liora.android.data.art.ArtworkRepository
 import com.liora.android.data.lyrics.LioraLyricsRepository
 import com.liora.android.data.lyrics.LyricsTranslationProgress
 import com.liora.android.data.lyrics.LyricsTranslationRepository
@@ -798,17 +799,21 @@ class MusicViewModel(
      */
     fun playProviderTrack(track: ProviderTrack) {
         viewModelScope.launch {
-            val source = extensions.providers.audioSource(track.id)
+            // La ficha completa (artista, album, portada) sale del endpoint de
+            // reproduccion: la busqueda no la trae.
+            val full = runCatching { extensions.providers.trackOf(track.id) }.getOrNull()
+            val meta = full ?: track
+            val source = extensions.providers.audioSource(meta.id)
             if (source == null) {
-                Log.i("LioraExt", "El proveedor no tiene fuente para ${track.id}")
+                Log.i("LioraExt", "El proveedor no tiene fuente para ${meta.id}")
                 return@launch
             }
             if (source.isExpired()) {
-                Log.i("LioraExt", "La fuente de ${track.id} ha caducado")
+                Log.i("LioraExt", "La fuente de ${meta.id} ha caducado")
                 return@launch
             }
             val resolved = extensions.audio.resolve(source)
-            val item = extensions.audio.toMediaItem(resolved, track.id, track.title, track.artist)
+            val item = extensions.audio.toMediaItem(resolved, meta.id, meta.title, meta.artist)
             mediaController?.let { controller ->
                 controller.setMediaItem(item)
                 controller.prepare()
@@ -817,8 +822,123 @@ class MusicViewModel(
             // La pista que suena es la del proveedor: su titulo, su artista y
             // su duracion, con una identidad propia para no mezclarse con la
             // cancion local.
-            _providerTrack.value = track
-            _currentSong.value = track.asSong()
+            _providerTrack.value = meta
+            val song = meta.asSong()
+            // La portada la da el proveedor: el reproductor y las listas
+            // muestran la misma.
+            ArtworkRepository.rememberArtwork(song, meta.artworkUrl)
+            _currentSong.value = song
+        }
+    }
+
+    /** La pista de proveedor cuyas opciones se están enseñando. */
+    private val _providerOptions = MutableStateFlow<ProviderTrack?>(null)
+    val providerOptions: StateFlow<ProviderTrack?> = _providerOptions.asStateFlow()
+
+    /**
+     * El servicio en el que se está iniciando sesión, si hay alguno.
+     *
+     * La pantalla de inicio lo usa para abrir la página de inicio de sesión.
+     */
+    private val _signingIn = MutableStateFlow<String?>(null)
+    val signingIn: StateFlow<String?> = _signingIn.asStateFlow()
+
+    /** Si hay sesión iniciada con YouTube. */
+    private val _signedIn = MutableStateFlow(extensions.sessions.has("youtube"))
+    val signedIn: StateFlow<Boolean> = _signedIn.asStateFlow()
+
+    /** La foto de la cuenta con la que se ha iniciado sesión, si la hay. */
+    private val _accountAvatarUri = MutableStateFlow(
+        extensions.sessions.avatarUrl("youtube"),
+    )
+    val accountAvatarUri: StateFlow<String?> = _accountAvatarUri.asStateFlow()
+
+    /** Empieza el inicio de sesión con un servicio. */
+    fun startSignIn(service: String) {
+        _signingIn.value = service
+    }
+
+    /** Cierra el inicio de sesión. */
+    fun cancelSignIn() {
+        _signingIn.value = null
+    }
+
+    /**
+     * Guarda la sesión que el usuario ha hecho en la página del servicio.
+     *
+     * Las cookies se guardan cifradas y la extensión las usa sin verlas.
+     */
+    fun onSessionCaptured(service: String, cookies: String, sapisid: String?, avatarUrl: String?) {
+        extensions.sessions.save(service, cookies, sapisid, avatarUrl)
+        _signingIn.value = null
+        _signedIn.value = extensions.sessions.has(service)
+        _accountAvatarUri.value = extensions.sessions.avatarUrl(service)
+        // Las extensiones deciden en su `initialize` si hay sesion: hay que
+        // recargarlas para que lo sepan.
+        viewModelScope.launch { extensions.reloadSessionUsers(service) }
+    }
+
+    /** Cierra el menú de opciones de una pista de proveedor. */
+    fun dismissProviderOptions() {
+        _providerOptions.value = null
+    }
+
+    /** Abre el menú de opciones de una pista de proveedor. */
+    fun showProviderOptions(track: ProviderTrack) {
+        _providerOptions.value = track
+    }
+
+    /** El mensaje de la última descarga, para enseñarlo al usuario. */
+    private val _downloadMessage = MutableStateFlow<String?>(null)
+    val downloadMessage: StateFlow<String?> = _downloadMessage.asStateFlow()
+
+    /** Las pistas que se están descargando ahora mismo. */
+    private val _downloading = MutableStateFlow<Set<String>>(emptySet())
+    val downloading: StateFlow<Set<String>> = _downloading.asStateFlow()
+
+    /** Cierra el mensaje de la última descarga. */
+    fun dismissDownloadMessage() {
+        _downloadMessage.value = null
+    }
+
+    /**
+     * Descarga una pista de un proveedor.
+     *
+     * La descarga la hace el propio proveedor (que es quien sabe de dónde
+     * sacarla) y la app la publica en la carpeta de Descargas. Solo se da por
+     * buena cuando el fichero ha llegado completo y se ha comprobado que es
+     * audio: que el proveedor diga "hecho" no basta.
+     */
+    fun downloadProviderTrack(track: ProviderTrack) {
+        if (track.id in _downloading.value) return
+        viewModelScope.launch {
+            val provider = extensions.registry.find(track.providerId)
+            if (provider == null) {
+                _downloadMessage.value = "No se encuentra la extensión que dio esta canción"
+                return@launch
+            }
+            _downloading.value = _downloading.value + track.id
+            _downloadMessage.value = "Descargando ${track.title}…"
+            val name = listOf(track.artist, track.title)
+                .filter { it.isNotBlank() }
+                .joinToString(" - ")
+            val result = runCatching {
+                extensions.downloads.download(
+                    provider = provider,
+                    trackId = track.id,
+                    quality = null,
+                    displayName = name,
+                )
+            }
+            _downloading.value = _downloading.value - track.id
+            _downloadMessage.value = result.fold(
+                onSuccess = { file ->
+                    "Guardado en ${file.location} (${file.format ?: "audio"})"
+                },
+                onFailure = { error ->
+                    error.message ?: "No se pudo descargar"
+                },
+            )
         }
     }
 

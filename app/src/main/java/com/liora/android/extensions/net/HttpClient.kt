@@ -1,11 +1,13 @@
 package com.liora.android.extensions.net
 
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.util.zip.GZIPInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -165,6 +167,11 @@ class UrlConnectionHttpClient(
     private val readTimeoutMs: Int = 90_000,
 ) : HttpClient {
 
+    companion object {
+        /** Tope de bytes al descomprimir una respuesta: 32 MB. */
+        const val MAX_DECOMPRESSED_BYTES = 32L * 1024 * 1024
+    }
+
     override suspend fun get(
         url: String,
         headers: Map<String, String>,
@@ -215,7 +222,8 @@ class UrlConnectionHttpClient(
                 }
                 val stream: InputStream? =
                     if (status in 200..299) connection.inputStream else connection.errorStream
-                val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                val text = stream?.let { readBody(it, connection.getHeaderField("Content-Encoding")) }
+                    .orEmpty()
                 return@withContext HttpResponse(
                     statusCode = status,
                     body = text,
@@ -248,7 +256,12 @@ class UrlConnectionHttpClient(
             policy.rejectionReason(current)?.let { reason ->
                 throw IOException(reason)
             }
-            val connection = open("GET", current, headersFor(current, origin, headers, policy))
+            val connection = open(
+                "GET",
+                current,
+                headersFor(current, origin, headers, policy),
+                compress = false,
+            )
             try {
                 // Leer el estado ya puede fallar si el servidor corta la
                 // conexion antes de mandar la respuesta completa.
@@ -330,6 +343,27 @@ class UrlConnectionHttpClient(
     }
 
     /**
+     * Lee el cuerpo de una respuesta y lo devuelve como texto.
+     *
+     * Si el servidor lo ha mandado comprimido con gzip, se descomprime aqui:
+     * al pedir la compresion a mano, Android no lo hace solo. Se pone un tope
+     * al tamaño descomprimido, para que una respuesta comprimida que se
+     * expande de golpe no se coma la memoria del movil.
+     */
+    private fun readBody(stream: InputStream, contentEncoding: String?): String {
+        val compressed = contentEncoding?.lowercase()?.contains("gzip") == true
+        val source = if (compressed) GZIPInputStream(stream) else stream
+        source.use { input ->
+            if (!compressed) {
+                return input.bufferedReader(Charsets.UTF_8).readText()
+            }
+            // Con gzip, el limite se cuenta sobre lo descomprimido.
+            val limited = BoundedInputStream(input, MAX_DECOMPRESSED_BYTES)
+            return limited.bufferedReader(Charsets.UTF_8).readText()
+        }
+    }
+
+    /**
      * Las cabeceras que viajan a este salto.
      *
      * Las sensibles (autorización, cookies) solo viajan mientras el destino
@@ -359,6 +393,7 @@ class UrlConnectionHttpClient(
         method: String,
         url: String,
         headers: Map<String, String>,
+        compress: Boolean = true,
     ): HttpURLConnection {
         val parsed = try {
             URI(url).toURL()
@@ -372,9 +407,50 @@ class UrlConnectionHttpClient(
         // Las redirecciones se siguen a mano, salto a salto, para poder
         // comprobar la politica en cada uno.
         connection.instanceFollowRedirects = false
-        connection.setRequestProperty("Accept-Encoding", "identity")
         for ((key, value) in headers) connection.setRequestProperty(key, value)
+        // Se pide "identity" siempre: hay servidores (los de YouTube, entre
+        // otros) que responden 400 si la peticion llega comprimida. Para los
+        // ficheros que se guardan, ademas, los bytes tienen que ser los del
+        // fichero, sin transformar.
+        connection.setRequestProperty("Accept-Encoding", "identity")
+        // La conexion se cierra tras la peticion: el grupo de conexiones de
+        // HttpURLConnection puede guardar una conexion a medio cerrar y la
+        // siguiente peticion se queda esperando minutos.
+        connection.setRequestProperty("Connection", "close")
         return connection
+    }
+}
+
+/**
+ * Un flujo que se corta al llegar a un tope de bytes leídos.
+ *
+ * Sirve para poner un límite a lo que se descomprime: una respuesta
+ * comprimida que al descomprimirse crezca sin control no puede dejarnos
+ * sin memoria.
+ */
+private class BoundedInputStream(
+    private val source: InputStream,
+    private val limit: Long,
+) : FilterInputStream(source) {
+
+    private var read = 0L
+
+    override fun read(): Int {
+        val value = super.read()
+        if (value >= 0) {
+            read++
+            if (read > limit) throw IOException("La respuesta descomprimida supera el tope")
+        }
+        return value
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        val count = super.read(buffer, offset, length)
+        if (count > 0) {
+            read += count
+            if (read > limit) throw IOException("La respuesta descomprimida supera el tope")
+        }
+        return count
     }
 }
 

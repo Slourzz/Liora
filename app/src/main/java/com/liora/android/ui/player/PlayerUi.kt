@@ -925,6 +925,7 @@ fun LioraFullPlayer(
                         positionMs = progress.positionMs,
                         durationMs = progress.durationMs,
                         onSeek = onSeek,
+                        busy = lyricsLoading,
                     )
                     Spacer(Modifier.height(16.dp))
                     TransportControls(
@@ -2075,6 +2076,8 @@ private fun PlayerProgressBar(
     positionMs: Long,
     durationMs: Long,
     onSeek: (Long) -> Unit,
+    /** Verdadero mientras se busca la letra: la barra avisa de que hay algo en marcha. */
+    busy: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val safeDuration = durationMs.coerceAtLeast(1L)
@@ -2138,6 +2141,25 @@ private fun PlayerProgressBar(
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.76f)),
                 )
+                // Mientras se busca la letra, la barra se ilumina: se ve que
+                // hay algo en marcha sin tener que mirar el boton de letras.
+                if (busy) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.10f),
+                                        Color.White.copy(alpha = 0.55f),
+                                        Color.White.copy(alpha = 0.10f),
+                                    ),
+                                ),
+                            ),
+                    )
+                }
             }
         }
 

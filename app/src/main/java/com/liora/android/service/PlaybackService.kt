@@ -5,6 +5,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.liora.android.extensions.audio.ProviderDataSourceFactory
+import com.liora.android.extensions.session.SessionStore
 
 class PlaybackService : MediaSessionService() {
 
@@ -16,7 +17,10 @@ class PlaybackService : MediaSessionService() {
         // de una redireccion se comprueba y las cabeceras de una fuente no
         // viajan a otro dominio. Lo local (ficheros del telefono) sigue
         // usando el comportamiento normal de Media3.
-        val dataSourceFactory = ProviderDataSourceFactory(this)
+        val dataSourceFactory = ProviderDataSourceFactory(
+            context = this,
+            sessions = SessionStore(this),
+        )
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(this)

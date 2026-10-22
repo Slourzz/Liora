@@ -151,7 +151,10 @@ object ArtworkRepository {
             return decodeFile(file, sizePx)
         }
 
-        val url = remoteUrl(context, key, song)
+        // Si el proveedor dio su portada, esa es la buena: es la de esa
+        // version exacta. Buscar en iTunes por titulo y artista podria
+        // devolver la portada de la cancion original para una cover.
+        val url = knownArtwork.get(key) ?: remoteUrl(context, key, song)
         if (!url.isNullOrEmpty()) {
             downloadBytes(url)?.let { bytes ->
                 runCatching {
@@ -161,6 +164,20 @@ object ArtworkRepository {
             }
         }
         return if (file.exists()) decodeFile(file, sizePx) else null
+    }
+
+    /** Las portadas que dio un proveedor, por canción. */
+    private val knownArtwork = LruCache<String, String>(32)
+
+    /**
+     * Anota la portada de una canción.
+     *
+     * La de un proveedor es la de esa version exacta: una cover ("karaoke",
+     * "slowed", un remix) no puede llevar la portada de la cancion original.
+     */
+    fun rememberArtwork(song: Song, url: String?) {
+        if (url.isNullOrBlank()) return
+        knownArtwork.put(artKey(song), url)
     }
 
     /** Dirección de la portada en iTunes, guardada para no repetir la búsqueda. */

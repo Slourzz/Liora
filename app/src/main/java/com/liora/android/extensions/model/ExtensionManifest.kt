@@ -35,6 +35,15 @@ data class ExtensionPermissions(
     val network: List<String> = emptyList(),
     val storage: Boolean = false,
     val file: Boolean = false,
+    /**
+     * Las sesiones de cuenta que la extensión puede usar.
+     *
+     * Son servicios ("youtube", por ejemplo) con los que el usuario ha
+     * iniciado sesión en Liora. La extensión **no** ve la sesión: la app se
+     * la añade a las peticiones cuando la extensión lo pide aquí. Sin este
+     * permiso, la extensión no recibe ninguna cookie.
+     */
+    val session: List<String> = emptyList(),
 ) {
     /** ¿Permite este permiso que se hable con ese dominio? */
     fun allowsDomain(domain: String): Boolean {
@@ -44,6 +53,13 @@ data class ExtensionPermissions(
             val rule = allowed.trim().lowercase()
             rule == target || (rule.startsWith("*.") && target.endsWith(rule.substring(1)))
         }
+    }
+
+    /** ¿Puede esta extensión usar la sesión de ese servicio? */
+    fun allowsSession(service: String): Boolean {
+        val target = service.trim().lowercase()
+        if (target.isEmpty()) return false
+        return session.any { it.trim().lowercase() == target }
     }
 
     companion object {
@@ -56,6 +72,7 @@ data class ExtensionPermissions(
                 network = domains,
                 storage = json.optBoolean("storage", false),
                 file = json.optBoolean("file", false),
+                session = json.optJSONArray("session")?.toStringList().orEmpty(),
             )
         }
     }

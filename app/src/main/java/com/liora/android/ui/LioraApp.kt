@@ -291,6 +291,9 @@ private fun LioraAppContent(
 
     val onSelect: (LioraTab) -> Unit = { tab ->
         searchOpen = false
+        // Al cambiar de seccion tambien se cierra la pantalla de extensiones:
+        // si no, el boton no hace nada y parece que la app esta colgada.
+        showExtensions = false
         selectedIndex = tab.ordinal
     }
 
@@ -329,6 +332,7 @@ private fun LioraAppContent(
                     hazeState = hazeState,
                     bottomPadding = bottomPadding,
                     collapseConnection = collapseController.nestedScrollConnection,
+                    onOpenSearch = { searchOpen = true },
                 )
 
                 LioraTab.Library -> LibraryScreen(

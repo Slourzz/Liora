@@ -64,22 +64,11 @@ fun SongRow(
                     ),
                 ),
         ) {
-            val artwork = rememberSongArtwork(song, sizePx = 144)
-            if (artwork != null) {
-                Image(
-                    bitmap = artwork,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.MusicNote,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
+            SongArtworkBox(
+                song = song,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
         Spacer(modifier = Modifier.width(14.dp))

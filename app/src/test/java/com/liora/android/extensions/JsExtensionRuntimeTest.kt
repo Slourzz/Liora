@@ -10,6 +10,7 @@ import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -193,6 +194,57 @@ class JsExtensionRuntimeTest {
         assertEquals("ok", track!!.title)
         assertEquals("denegado", track.artist)
         runtime.unload()
+    }
+
+    @Test
+    fun `las cabeceras que pone el script llegan a la peticion`() {
+        // Sin esto, una API que exija cabeceras (como la de YouTube) responde
+        // 400 aunque el script las mande bien.
+        val http = FakeHttpClient()
+        http.on("https://api.example.com/datos", """{"ok":true}""")
+        val script = """
+            registerExtension({
+                initialize: function() { return { ok: true }; },
+                getTrack: function(request) {
+                    host.http("POST", "https://api.example.com/datos", "{}",
+                        { "Content-Type": "application/json", "X-Api": "clave" });
+                    return { id: request.trackId, title: "t", artist: "a" };
+                }
+            });
+        """.trimIndent()
+        val runtime = runtime(script = script, http = http)
+        runtime.load()
+        runtime.getTrack("x")
+        val sent = http.sentHeaders["https://api.example.com/datos"]
+        assertNotNull("la peticion no se registro", sent)
+        assertEquals("application/json", sent!!["Content-Type"])
+        assertEquals("clave", sent["X-Api"])
+        runtime.unload()
+    }
+
+    @Test
+    fun `la sesion solo se usa si el manifiesto la pide`() {
+        val http = FakeHttpClient()
+        http.on("https://api.example.com/datos", """{"ok":true}""")
+        val script = """
+            registerExtension({
+                initialize: function() { return { ok: true }; },
+                getTrack: function(request) {
+                    host.http("GET", "https://api.example.com/datos", null);
+                    return { id: request.trackId, title: "t", artist: "a" };
+                }
+            });
+        """.trimIndent()
+
+        // Sin permiso de sesion: la peticion no lleva cookie.
+        val sinPermiso = runtime(script = script, http = http)
+        sinPermiso.load()
+        sinPermiso.getTrack("x")
+        assertNull(
+            "sin permiso no debe haber cookie",
+            http.sentHeaders["https://api.example.com/datos"]?.get("Cookie"),
+        )
+        sinPermiso.unload()
     }
 
     @Test

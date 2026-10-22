@@ -134,8 +134,16 @@ class JsExtensionRuntime(
         }
     }
 
-    /** Llama a `cleanup` y apaga el motor. */
+    /**
+     * Llama a `cleanup` y apaga el motor.
+     *
+     * No espera a que termine lo que estuviera haciendo la extensión: si
+     * estaba en una búsqueda larga, esa tarea se cancela. La app llama a este
+     * método desde el hilo de la interfaz, y quedarse esperando ahí congella
+     * la pantalla.
+     */
     fun unload() {
+        host.cancel()
         runCatching {
             executor.submit {
                 runCatching { invoke("cleanup", listOf()) }
@@ -144,9 +152,9 @@ class JsExtensionRuntime(
                 registered = null
                 loaded = false
                 runCatching { factory.exit() }
-            }.get()
+            }.get(UNLOAD_WAIT_MS, TimeUnit.MILLISECONDS)
         }
-        executor.shutdown()
+        executor.shutdownNow()
     }
 
     /** Cancela las descargas y operaciones en curso de esta extensión. */
@@ -291,8 +299,16 @@ class JsExtensionRuntime(
 
     /** Ejecuta una función de la_extension dentro del hilo del runtime. */
     private fun invoke(functionName: String, args: List<String>): Any? {
+        val started = System.currentTimeMillis()
         val task = executor.submit<Any?> { callOnCurrentThread(functionName, args) }
-        return awaitWithTimeout(task, functionName)
+        return try {
+            awaitWithTimeout(task, functionName)
+        } finally {
+            com.liora.android.extensions.ExtLog.i(
+                "La extensión '${manifest.id}' tardó ${System.currentTimeMillis() - started} ms " +
+                    "en '$functionName'",
+            )
+        }
     }
 
     /**
@@ -369,6 +385,8 @@ class JsExtensionRuntime(
                 args.getOrNull(0)?.toString().orEmpty(),
                 args.getOrNull(1)?.toString().orEmpty(),
                 args.getOrNull(2)?.toString(),
+                parseHeaders(args.getOrNull(3)?.toString()),
+                args.getOrNull(4)?.toString() == "1",
             )
         }
         define("__host_storage_get") { args ->
@@ -389,6 +407,7 @@ class JsExtensionRuntime(
             host.fileDownload(
                 args.getOrNull(0)?.toString().orEmpty(),
                 args.getOrNull(1)?.toString().orEmpty(),
+                parseHeaders(args.getOrNull(2)?.toString()),
             )
         }
         define("__host_file_read") { args ->
@@ -399,6 +418,31 @@ class JsExtensionRuntime(
                 args.getOrNull(0)?.toString().orEmpty(),
                 args.getOrNull(1)?.toString().orEmpty(),
             )
+        }
+        define("__host_session_has") { args ->
+            host.hasSession(args.getOrNull(0)?.toString().orEmpty())
+        }
+    }
+
+    /**
+     * Las cabeceras que la extensión pide para su petición.
+     *
+     * El script las manda como un objeto JSON: aquí se vuelven a convertir en
+     * el mapa que espera el cliente HTTP. Si el script no manda ninguna, la
+     * petición sale sin cabeceras extra.
+     */
+    private fun parseHeaders(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return try {
+            val json = JSONObject(raw)
+            val result = mutableMapOf<String, String>()
+            for (key in json.keys()) {
+                val value = json.optString(key).ifBlank { json.opt(key)?.toString().orEmpty() }
+                if (value.isNotEmpty()) result[key] = value
+            }
+            result
+        } catch (_: Exception) {
+            emptyMap()
         }
     }
 
@@ -440,7 +484,9 @@ class JsExtensionRuntime(
         return AudioSource(
             kind = AudioSourceKind.fromWire(optString("kind", "playable")) ?: AudioSourceKind.PLAYABLE,
             url = url,
-            mimeType = optString("mimeType").ifBlank { null },
+            // El tipo puede venir con los codigos ("audio/mp4; codecs=..."):
+            // a Media3 le sirve solo el tipo.
+            mimeType = optString("mimeType").substringBefore(";").trim().ifBlank { null },
             bitrateKbps = optInt("bitrateKbps", 0).takeIf { it > 0 },
             sampleRateHz = optInt("sampleRateHz", 0).takeIf { it > 0 },
             channels = optInt("channels", 0).takeIf { it > 0 },
@@ -457,14 +503,24 @@ class JsExtensionRuntime(
          * El plazo por defecto de una llamada a un proveedor.
          *
          * Es holgado a proposito: las busquedas de los proveedores devuelven
-         * listas grandes (YouTube Music manda casi 800 KB) y en una conexion
-         * lenta se puede pasar de un minuto. El script sigue teniendo limite
-         * de instrucciones, asi que un bucle infinito no se cuela por aqui.
+         * listas grandes (YouTube Music manda casi 800 KB) y con una conexion
+         * lenta (unos 6 KB/s) eso son mas de dos minutos. El script sigue
+         * teniendo limite de instrucciones, asi que un bucle infinito no se
+         * cuela por aqui.
          */
-        const val DEFAULT_TIMEOUT_MS = 120_000L
+        const val DEFAULT_TIMEOUT_MS = 240_000L
 
         /** La holgura antes de dar la llamada por perdida. */
         private const val GRACE_MS = 2_000L
+
+        /**
+         * Cuánto se espera a que la extensión termine al apagarla.
+         *
+         * Es corto a proposito: la app apaga la extensión desde el hilo de la
+         * interfaz y no puede quedarse esperando a que una busqueda larga
+         * acabe.
+         */
+        private const val UNLOAD_WAIT_MS = 2_000L
 
         /** Cuántas instrucciones se cuentan entre aviso y aviso. */
         private const val INSTRUCTION_THRESHOLD = 20_000
@@ -515,9 +571,11 @@ class JsExtensionRuntime(
         private val BOOTSTRAP = """
             var __registered = null;
             var host = {
-                http: function(method, url, body) {
+                http: function(method, url, body, headers, useSession) {
                     var b = (body === null || body === undefined) ? null : String(body);
-                    return JSON.parse(__host_http(String(method), String(url), b));
+                    var h = JSON.stringify(headers || {});
+                    var s = useSession ? "1" : "0";
+                    return JSON.parse(__host_http(String(method), String(url), b, h, s));
                 },
                 storage: {
                     get: function(key) {
@@ -534,11 +592,17 @@ class JsExtensionRuntime(
                     error: function(message) { __host_log(3, String(message)); }
                 },
                 file: {
-                    download: function(url, target) {
-                        return JSON.parse(__host_file_download(String(url), String(target)));
+                    download: function(url, target, headers) {
+                        var h = JSON.stringify(headers || {});
+                        return JSON.parse(__host_file_download(String(url), String(target), h));
                     },
                     readText: function(path) { return __host_file_read(String(path)); },
                     writeText: function(path, text) { __host_file_write(String(path), String(text)); }
+                },
+                session: {
+                    // La extension solo pregunta si hay sesion: la cookie la
+                    // pone la app en la peticion, no le llega al script.
+                    has: function(service) { return __host_session_has(String(service)); }
                 }
             };
             function registerExtension(functions) {
