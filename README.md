@@ -15,6 +15,36 @@ Liora lee tu biblioteca de audio directamente del dispositivo (sin servidores, s
 - 🔐 **Permisos por versión**: usa `READ_MEDIA_AUDIO` en Android 13+ y `READ_EXTERNAL_STORAGE` en versiones anteriores.
 - 📱 Compatible desde **Android 7.0 (API 24)**.
 
+## 🔌 Extensiones
+
+Liora admite **proveedores externos** que viven en un repositorio aparte
+([Liora-Extensions](https://github.com/Slourzz/Liora-Extensions)): Ajustes →
+Extensiones → *Añadir repositorio* → la dirección de su `registry.json`.
+
+Una extensión es un paquete `.lioraext` (un ZIP) con un `manifest.json` y su
+código en JavaScript. Se instala, se verifica con su **SHA-256** y se ejecuta
+en un motor **Rhino** aislado, sin acceso a las clases de Java.
+
+### Qué límites impone el runtime, de verdad
+
+- **Tiempo**: cada llamada a un proveedor tiene un plazo (20 s por defecto) y
+  Rhino cuenta instrucciones: al pasarse, la ejecución se aborta. Un bucle
+  infinito no cuelga la app.
+- **Hilos**: cada extensión corre en su propio hilo y no comparte estado con
+  Liora. Un fallo se marca en esa extensión y no afecta a las demás.
+- **Red**: solo los dominios que declara el manifiesto, siempre por https, y
+  **se comprueba en cada salto de una redirección**. Una cabecera de
+  autorización no viaja a otro dominio.
+- **Ficheros**: la extensión solo escribe en su propia carpeta y en las que
+  Liora le concede.
+- **Memoria**: **Rhino no impone un límite de memoria** y esta es la mayor
+  debilidad del aislamiento: un script que reserve mucha memoria puede
+  agotar el heap de la app. El límite de instrucciones acota el tiempo, no la
+  memoria. Por eso un repositorio de extensiones **no oficial** es código de
+  terceros con la confianza que merezca: instálalo solo si te fías de quien
+  lo publica. Un proceso separado lo aislaría del todo, a costa de un
+  servicio con su propia IPC; queda como mejora pendiente.
+
 ## 🧱 Stack técnico
 
 | Componente | Versión |

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,6 +80,8 @@ fun ExtensionsScreen(
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var configuring by remember { mutableStateOf<com.liora.android.extensions.model.ExtensionManifest?>(null) }
+    var settingsDialog by remember { mutableStateOf(false) }
 
     /** Recarga el catálogo y el estado de las instaladas. */
     suspend fun refresh() {
@@ -183,6 +186,13 @@ fun ExtensionsScreen(
                         types = entry.types,
                         enabled = entry.enabled,
                         error = entry.error,
+                        onConfigure = {
+                            val manifest = service.manifestOf(entry.extensionId)
+                            if (manifest != null && manifest.settings.isNotEmpty()) {
+                                configuring = manifest
+                                settingsDialog = true
+                            }
+                        },
                         onToggle = { enabled ->
                             service.setEnabled(entry.extensionId, enabled)
                             installed = service.installedEntries()
@@ -243,6 +253,22 @@ fun ExtensionsScreen(
                 )
             }
         }
+    }
+
+    if (settingsDialog && configuring != null) {
+        ExtensionSettingsDialog(
+            manifest = configuring!!,
+            values = service.settingsOf(configuring!!.id),
+            onDismiss = { settingsDialog = false },
+            onSave = { values ->
+                settingsDialog = false
+                scope.launch {
+                    runCatching { service.setExtensionSettings(configuring!!.id, values) }
+                        .onFailure { error = it.message }
+                    refresh()
+                }
+            },
+        )
     }
 
     if (showAdd) {
@@ -364,6 +390,7 @@ private fun InstalledRow(
     types: Set<ProviderType>,
     enabled: Boolean,
     error: String?,
+    onConfigure: () -> Unit = {},
     onToggle: (Boolean) -> Unit,
     onUninstall: () -> Unit,
 ) {
@@ -394,6 +421,13 @@ private fun InstalledRow(
             }
         }
         Switch(checked = enabled, onCheckedChange = onToggle)
+        IconButton(onClick = onConfigure) {
+            Icon(
+                imageVector = Icons.Rounded.Tune,
+                contentDescription = "Configurar la extensión",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         IconButton(onClick = onUninstall) {
             Icon(
                 imageVector = Icons.Rounded.Delete,
@@ -508,6 +542,54 @@ private fun permissionsLabel(extension: com.liora.android.extensions.model.Regis
         "cualquier versión"
     }
     return parts.joinToString(" · ")
+}
+
+/**
+ * Los ajustes de una extensión: un campo por cada ajuste que declara su
+ * manifiesto. Lo que se escribe se queda en la app y se le pasa a la
+ * extensión al inicializarse.
+ */
+@Composable
+private fun ExtensionSettingsDialog(
+    manifest: com.liora.android.extensions.model.ExtensionManifest,
+    values: Map<String, String>,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, String>) -> Unit,
+) {
+    var current by remember(manifest.id) {
+        mutableStateOf(
+            manifest.settings.associate { setting ->
+                setting.key to (values[setting.key] ?: setting.default)
+            },
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ajustes de ${manifest.displayName}") },
+        text = {
+            Column {
+                manifest.settings.forEach { setting ->
+                    OutlinedTextField(
+                        value = current[setting.key].orEmpty(),
+                        onValueChange = { value ->
+                            current = current + (setting.key to value)
+                        },
+                        singleLine = true,
+                        label = { Text(setting.label) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(current) }) { Text("Guardar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        },
+    )
 }
 
 @Composable

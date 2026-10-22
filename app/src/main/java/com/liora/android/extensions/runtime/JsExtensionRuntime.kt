@@ -53,6 +53,11 @@ class JsExtensionRuntime(
     private val script: String,
     private val host: ExtensionHostApi,
     private val timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+    /**
+     * Los ajustes que el usuario ha puesto a la extension (claves de API,
+     * país, lo que sea). Se le pasan en `initialize`.
+     */
+    private val settings: Map<String, String> = emptyMap(),
 ) : MetadataProvider, TrackSearchProvider, AudioSourceProvider, AudioDownloadProvider,
     LyricsProvider {
 
@@ -411,6 +416,7 @@ class JsExtensionRuntime(
                 .put("file", manifest.permissions.file),
         )
         .put("assetScheme", ASSET_SCHEME)
+        .put("settings", JSONObject(settings))
         .toString()
 
     private fun JSONObject.toTrack(providerId: String): ProviderTrack = ProviderTrack(

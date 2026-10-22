@@ -163,6 +163,38 @@ class LioraPrefs(context: Context) {
             .putStringSet(KEY_DISABLED_EXTENSIONS, value.toSet())
             .apply()
 
+    /**
+     * Los ajustes que el usuario ha puesto a cada extension.
+     *
+     * Son claves sueltas (por ejemplo, las credenciales de una API), nunca
+     * secretos de la app. Se guardan en las preferencias de la app, no en la
+     * extension: la extension solo los recibe al inicializarse.
+     */
+    var extensionSettings: Map<String, Map<String, String>>
+        get() {
+            val raw = prefs.getString(KEY_EXTENSION_SETTINGS, null) ?: return emptyMap()
+            return runCatching {
+                val json = org.json.JSONObject(raw)
+                val result = mutableMapOf<String, Map<String, String>>()
+                for (id in json.keys()) {
+                    val values = json.optJSONObject(id) ?: continue
+                    result[id] = values.keys().asSequence().associateWith { key ->
+                        values.optString(key)
+                    }
+                }
+                result
+            }.getOrDefault(emptyMap())
+        }
+        set(value) {
+            val json = org.json.JSONObject()
+            for ((id, values) in value) {
+                val object_ = org.json.JSONObject()
+                for ((key, item) in values) object_.put(key, item)
+                json.put(id, object_)
+            }
+            prefs.edit().putString(KEY_EXTENSION_SETTINGS, json.toString()).apply()
+        }
+
     /** Guarda de una sola vez canción, posición y estado de la reproducción. */
     fun savePlayback(songId: Long, positionMs: Long, playing: Boolean) {
         prefs.edit()
@@ -203,6 +235,7 @@ class LioraPrefs(context: Context) {
         private const val KEY_LAST_PLAYING = "last_playing"
         private const val KEY_EXTENSION_REPOSITORIES = "extension_repositories"
         private const val KEY_DISABLED_EXTENSIONS = "disabled_extensions"
+        private const val KEY_EXTENSION_SETTINGS = "extension_settings"
     }
 }
 

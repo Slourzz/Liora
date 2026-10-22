@@ -139,6 +139,27 @@ class ExtensionsService(
         extensionId !in prefs.disabledExtensions
 
     /**
+     * Guarda los ajustes de una extensión y la vuelve a cargar.
+     *
+     * Los ajustes se quedan en la app, no en la extensión: solo se le pasan
+     * al inicializarse.
+     */
+    suspend fun setExtensionSettings(extensionId: String, values: Map<String, String>) {
+        prefs.extensionSettings = prefs.extensionSettings + (extensionId to values)
+        registry.find(extensionId)?.runtime?.unload()
+        registry.unregister(extensionId)
+        installer.installed().firstOrNull { it.id == extensionId }?.let { load(it) }
+    }
+
+    /** Los ajustes que tiene puestos una extensión. */
+    fun settingsOf(extensionId: String): Map<String, String> =
+        prefs.extensionSettings[extensionId].orEmpty()
+
+    /** El manifiesto de una extensión instalada. */
+    fun manifestOf(extensionId: String): ExtensionManifest? =
+        installer.installed().firstOrNull { it.id == extensionId }
+
+    /**
      * Carga las extensiones instaladas.
      *
      * Se llama al abrir la app: cada extensión se carga en su propio runtime
@@ -193,7 +214,12 @@ class ExtensionsService(
                 File(appContext.filesDir, "extensiones/descargas"),
             ),
         )
-        val runtime = JsExtensionRuntime(manifest, script, host)
+        val runtime = JsExtensionRuntime(
+            manifest = manifest,
+            script = script,
+            host = host,
+            settings = prefs.extensionSettings[manifest.id].orEmpty(),
+        )
         val enabled = isEnabled(manifest.id)
         val entry = ProviderEntry(
             extensionId = manifest.id,

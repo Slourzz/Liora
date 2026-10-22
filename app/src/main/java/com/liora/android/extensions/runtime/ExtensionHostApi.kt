@@ -63,8 +63,14 @@ class ExtensionHostApi(
 
     // ------------------------------------------------------------------ http
 
-    /** Una petición HTTP desde la extensión, sujeta a los dominios permitidos. */
-    fun http(method: String, url: String, body: String?): String {
+    /**
+     * Una peticion HTTP desde la extension, sujeta a los dominios permitidos.
+     *
+     * @param headers cabeceras extra. Las sensibles (autorizacion, cookies)
+     *   no viajan a un dominio distinto del de origen: lo comprueba el
+     *   cliente HTTP en cada salto de una redireccion.
+     */
+    fun http(method: String, url: String, body: String?, headers: Map<String, String> = emptyMap()): String {
         val host = hostOf(url)
         if (!manifest.permissions.allowsDomain(host)) {
             return error(
@@ -78,8 +84,8 @@ class ExtensionHostApi(
         return try {
             val response = runBlocking {
                 when (method.uppercase()) {
-                    "GET" -> http.get(url, policy = policy())
-                    "POST" -> http.post(url, body, policy = policy())
+                    "GET" -> http.get(url, headers, policy())
+                    "POST" -> http.post(url, body, headers, policy())
                     else -> null
                 }
             } ?: return error("unsupported", "Método no admitido: $method")

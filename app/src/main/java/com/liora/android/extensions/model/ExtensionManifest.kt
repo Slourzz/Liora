@@ -62,6 +62,20 @@ data class ExtensionPermissions(
 }
 
 /**
+ * Un ajuste que la extension pide al usuario.
+ *
+ * `secret` marca los que son claves: la app los guarda como cualquier otro
+ * ajuste, pero no los enseña en ningun registro.
+ */
+data class ExtensionSetting(
+    val key: String,
+    val label: String,
+    val type: String = "string",
+    val secret: Boolean = false,
+    val default: String = "",
+)
+
+/**
  * El manifiesto de una extensión: el contrato que declara qué es, qué
  * necesita y qué puede hacer.
  */
@@ -78,6 +92,8 @@ data class ExtensionManifest(
     val types: List<ProviderType>,
     val permissions: ExtensionPermissions,
     val entrypoint: String,
+    /** Los ajustes que la extension pide al usuario. */
+    val settings: List<ExtensionSetting> = emptyList(),
 ) {
     /** ¿La extensión declara este tipo de proveedor? */
     fun has(type: ProviderType): Boolean = types.contains(type)
@@ -140,6 +156,23 @@ data class ExtensionManifest(
                 )
             }
 
+            val settings = mutableListOf<ExtensionSetting>()
+            val settingArray = json.optJSONArray("settings")
+            if (settingArray != null) {
+                for (index in 0 until settingArray.length()) {
+                    val item = settingArray.optJSONObject(index) ?: continue
+                    val key = item.optString("key").trim()
+                    if (key.isEmpty()) continue
+                    settings += ExtensionSetting(
+                        key = key,
+                        label = item.optString("label").ifBlank { key },
+                        type = item.optString("type", "string"),
+                        secret = item.optBoolean("secret", false),
+                        default = item.optString("default"),
+                    )
+                }
+            }
+
             return ExtensionManifest(
                 schemaVersion = schema,
                 id = id,
@@ -153,6 +186,7 @@ data class ExtensionManifest(
                 types = types,
                 permissions = ExtensionPermissions.from(json.optJSONObject("permissions")),
                 entrypoint = entrypoint,
+                settings = settings,
             )
         }
     }
