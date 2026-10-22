@@ -42,10 +42,18 @@ class AudioSourceAdapter(context: Context) {
     /**
      * El `MediaItem` con el que se reproduce una fuente.
      *
+     * Las cabeceras que el proveedor autorizó quedan anotadas para esa URL
+     * concreta: el origen de datos las aplica a la petición y a nadie más. La
+     * tabla se limpia cuando cambia la pista, así que una fuente no puede
+     * contaminar a otra ni a la música local.
+     *
      * @param trackId el identificador de la pista en el proveedor.
      */
     fun toMediaItem(source: AudioSource, trackId: String, title: String, artist: String): MediaItem {
         val resolved = resolve(source)
+        if (resolved.headers.isNotEmpty()) {
+            ProviderSourceRegistry.register(resolved.url, resolved.headers)
+        }
         return MediaItem.Builder()
             .setUri(resolved.url)
             .setMediaId(trackId)

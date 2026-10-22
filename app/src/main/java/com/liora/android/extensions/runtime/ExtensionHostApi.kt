@@ -3,6 +3,7 @@ package com.liora.android.extensions.runtime
 import android.content.Context
 import com.liora.android.extensions.model.ExtensionManifest
 import com.liora.android.extensions.net.HttpClient
+import com.liora.android.extensions.net.NetworkPolicy
 import com.liora.android.extensions.net.hostOf
 import java.io.File
 import java.io.FileOutputStream
@@ -77,8 +78,8 @@ class ExtensionHostApi(
         return try {
             val response = runBlocking {
                 when (method.uppercase()) {
-                    "GET" -> http.get(url)
-                    "POST" -> http.post(url, body)
+                    "GET" -> http.get(url, policy = policy())
+                    "POST" -> http.post(url, body, policy = policy())
                     else -> null
                 }
             } ?: return error("unsupported", "Método no admitido: $method")
@@ -91,6 +92,19 @@ class ExtensionHostApi(
             error("network_error", error.message ?: "fallo de red")
         }
     }
+
+    /**
+     * La política de red de esta extensión.
+     *
+     * Solo los dominios del manifiesto, https siempre, y las cabeceras
+     * sensibles no viajan a otro dominio. La comprueba el cliente HTTP en
+     * cada salto de una redirección, no el script.
+     */
+    private fun policy(): NetworkPolicy = NetworkPolicy(
+        allowedDomains = manifest.permissions.network,
+        requireHttps = true,
+        maxRedirects = MAX_REDIRECTS,
+    )
 
     // --------------------------------------------------------------- storage
 
@@ -171,6 +185,7 @@ class ExtensionHostApi(
                     http.download(
                         url = url,
                         target = output,
+                        policy = policy(),
                         onProgress = { bytes, total ->
                             written = bytes
                             progress?.invoke(bytes, total)
@@ -179,6 +194,17 @@ class ExtensionHostApi(
                 }
                 if (outcome.bytesWritten <= 0L) {
                     return error("download_failed", "La descarga no devolvió datos")
+                }
+                if (outcome.looksTruncated) {
+                    // El servidor dijo cuanto venir y no es lo que vino: el
+                    // fichero esta a medias y no vale.
+                    return error(
+                        "download_incomplete",
+                        "La descarga se ha cortado: venían ${outcome.expectedBytes} bytes y han llegado ${outcome.bytesWritten}",
+                    )
+                }
+                if (outcome.statusCode !in 200..299) {
+                    return error("download_failed", "La descarga falló con el código ${outcome.statusCode}")
                 }
             }
             JSONObject()
@@ -250,5 +276,8 @@ class ExtensionHostApi(
     companion object {
         /** El esquema con el que se piden los recursos de la propia aplicación. */
         const val ASSET_SCHEME = "liora-asset://"
+
+        /** Cuántas redirecciones se siguen como máximo en una petición. */
+        const val MAX_REDIRECTS = 5
     }
 }

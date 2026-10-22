@@ -1,8 +1,10 @@
 package com.liora.android.service
 
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.liora.android.extensions.audio.ProviderDataSourceFactory
 
 class PlaybackService : MediaSessionService() {
 
@@ -10,7 +12,17 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        val player = ExoPlayer.Builder(this).build()
+        // Los origins HTTP pasan por la politica de red de Liora: cada salto
+        // de una redireccion se comprueba y las cabeceras de una fuente no
+        // viajan a otro dominio. Lo local (ficheros del telefono) sigue
+        // usando el comportamiento normal de Media3.
+        val dataSourceFactory = ProviderDataSourceFactory(this)
+        val player = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(this)
+                    .setDataSourceFactory(dataSourceFactory),
+            )
+            .build()
         mediaSession = MediaSession.Builder(this, player).build()
     }
 

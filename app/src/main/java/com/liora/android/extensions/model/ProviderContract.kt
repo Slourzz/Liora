@@ -99,6 +99,8 @@ data class DownloadResult(
     val bytesWritten: Long = 0L,
     val error: String? = null,
     val errorType: String? = null,
+    /** El tipo del fichero, si el proveedor lo sabe: `audio/mpeg`, `audio/flac`… */
+    val mimeType: String? = null,
 )
 
 /** Metadatos de una pista. */

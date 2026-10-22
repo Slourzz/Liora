@@ -2,6 +2,7 @@ package com.liora.android.ui.viewmodel
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +26,7 @@ import com.liora.android.data.model.toAudioFolders
 import com.liora.android.data.model.withTranslation
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.extensions.ExtensionsService
+import com.liora.android.extensions.audio.ProviderSourceRegistry
 import com.liora.android.extensions.model.ProviderTrack
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.service.PlaybackService
@@ -720,6 +722,10 @@ class MusicViewModel(
         queue = songs
         _queueSongs.value = queue
         publishSong(song)
+        // Vuelve la musica local: se olvida la pista del proveedor y sus
+        // cabeceras, que no tienen por que viajar a otra reproduccion.
+        _providerTrack.value = null
+        ProviderSourceRegistry.clear()
 
         mediaController?.let { controller ->
             controller.setMediaItems(songs.map { it.toMediaItem() }, startIndex, 0L)
@@ -755,8 +761,33 @@ class MusicViewModel(
                 controller.prepare()
                 controller.play()
             }
+            // La pista que suena es la del proveedor: su titulo, su artista y
+            // su duracion, con una identidad propia para no mezclarse con la
+            // cancion local.
+            _providerTrack.value = track
+            _currentSong.value = track.asSong()
         }
     }
+
+    /**
+     * Una pista de proveedor, vista como cancion.
+     *
+     * El identificador es negativo: nunca coincide con el de una cancion del
+     * telefono, asi que las dos identidades siguen separadas.
+     */
+    private fun ProviderTrack.asSong(): Song = Song(
+        // El identificador del proveedor es una cadena: se deriva un numero
+        // negativo para que nunca choque con el de una cancion del telefono.
+        id = -kotlin.math.abs(this.id.hashCode().toLong()) - 1L,
+        title = title,
+        artist = artist,
+        album = album,
+        duration = durationMs,
+        contentUri = Uri.EMPTY,
+        albumArtUri = null,
+        folder = "",
+        systemSound = false,
+    )
 
     /**
      * Busca en los proveedores que aportan las extensiones instaladas.

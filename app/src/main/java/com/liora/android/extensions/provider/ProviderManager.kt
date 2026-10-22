@@ -8,6 +8,7 @@ import com.liora.android.extensions.model.ExtensionException
 import com.liora.android.extensions.model.ProviderLyrics
 import com.liora.android.extensions.model.ProviderTrack
 import com.liora.android.extensions.model.ProviderType
+import com.liora.android.extensions.net.hostOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -107,6 +108,10 @@ class ProviderManager(private val registry: ProviderRegistry) {
      *
      * Se pregunta a los proveedores de audio por orden; el primero que
      * devuelve una fuente válida sirve. Los que fallan se saltan.
+     *
+     * Antes de devolverla se comprueba que el proveedor tenga permiso para
+     * hablar con el dominio de la fuente: una extensión no puede entregar una
+     * URL de un sitio que no le está permitido.
      */
     suspend fun audioSource(trackId: String, quality: String? = null): AudioSource? =
         withContext(Dispatchers.IO) {
@@ -116,7 +121,16 @@ class ProviderManager(private val registry: ProviderRegistry) {
                         registry.setError(entry.extensionId, error.message)
                         null
                     }
-                if (source != null) return@withContext source
+                if (source == null) continue
+                val host = hostOf(source.url)
+                if (!entry.allowsDomain(host)) {
+                    registry.setError(
+                        entry.extensionId,
+                        "La fuente apunta a '$host', un dominio sin permiso",
+                    )
+                    continue
+                }
+                return@withContext source
             }
             null
         }
@@ -145,7 +159,16 @@ class ProviderManager(private val registry: ProviderRegistry) {
                         registry.setError(entry.extensionId, error.message)
                         null
                     }
-                if (source != null) return@withContext source
+                if (source == null) continue
+                val host = hostOf(source.url)
+                if (!entry.allowsDomain(host)) {
+                    registry.setError(
+                        entry.extensionId,
+                        "La descarga apunta a '$host', un dominio sin permiso",
+                    )
+                    continue
+                }
+                return@withContext source
             }
             null
         }

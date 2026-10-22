@@ -17,9 +17,27 @@ data class ProviderEntry(
     val runtime: JsExtensionRuntime,
     val enabled: Boolean,
     val error: String? = null,
+    /**
+     * Los dominios a los que la extensión tiene permiso.
+     *
+     * Se comprueban antes de reproducir o descargar una fuente: una extensión
+     * no puede entregar una URL de un sitio que no le está permitido.
+     */
+    val allowedDomains: List<String> = emptyList(),
 ) {
     /** ¿Esta extensión ofrece este tipo de proveedor? */
     fun provides(type: ProviderType): Boolean = enabled && types.contains(type)
+
+    /** ¿Puede esta extensión hablar con ese dominio? */
+    fun allowsDomain(domain: String): Boolean {
+        if (allowedDomains.isEmpty()) return false
+        val target = domain.trim().lowercase()
+        if (target.isEmpty()) return false
+        return allowedDomains.any { allowed ->
+            val rule = allowed.trim().lowercase()
+            rule == target || (rule.startsWith("*.") && target.endsWith(rule.substring(1)))
+        }
+    }
 }
 
 /**

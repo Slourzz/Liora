@@ -228,6 +228,7 @@ class JsExtensionRuntime(
                     success = true,
                     filePath = result.optString("filePath").ifBlank { targetPath },
                     bytesWritten = result.optLong("bytes", 0L),
+                    mimeType = result.optString("mimeType").ifBlank { null },
                 )
             }
             return DownloadResult(

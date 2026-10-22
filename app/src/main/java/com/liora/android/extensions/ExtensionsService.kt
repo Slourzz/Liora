@@ -74,7 +74,7 @@ class ExtensionsService(
     val installer = ExtensionInstaller(rootDir, http, PackageValidator(appVersion()))
 
     /** El gestor de descargas de audio. */
-    val downloads = DownloadManager(appContext.filesDir)
+    val downloads = DownloadManager(appContext)
 
     /** El adaptador que traduce las fuentes de los proveedores a Media3. */
     val audio = AudioSourceAdapter(appContext)
@@ -186,9 +186,12 @@ class ExtensionsService(
             http = http,
             assetResolver = { name -> resolveAsset(name) },
             logger = { message -> Log.i("LioraExt", message) },
-            // La carpeta de descargas es de la app: la extension puede
-            // escribir ahi porque es donde se publican sus ficheros.
-            extraRoots = listOf(File(appContext.filesDir, "extensiones/descargas")),
+            // Carpetas donde la extension puede escribir: la de sus datos, la
+            // de los temporales de descarga y la de las descargas ya hechas.
+            extraRoots = listOf(
+                File(appContext.cacheDir, "extensiones/descargas"),
+                File(appContext.filesDir, "extensiones/descargas"),
+            ),
         )
         val runtime = JsExtensionRuntime(manifest, script, host)
         val enabled = isEnabled(manifest.id)
@@ -199,6 +202,7 @@ class ExtensionsService(
             types = manifest.types.toSet(),
             runtime = runtime,
             enabled = enabled,
+            allowedDomains = manifest.permissions.network,
         )
         registry.register(entry)
 

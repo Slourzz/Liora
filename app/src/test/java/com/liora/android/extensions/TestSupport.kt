@@ -3,6 +3,7 @@ package com.liora.android.extensions
 import com.liora.android.extensions.net.DownloadOutcome
 import com.liora.android.extensions.net.HttpClient
 import com.liora.android.extensions.net.HttpResponse
+import com.liora.android.extensions.net.NetworkPolicy
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
@@ -22,6 +23,9 @@ class FakeHttpClient(
     /** Las URL pedidas, en orden. */
     val requested: MutableList<String> = mutableListOf()
 
+    /** Las cabeceras de cada petición, por URL. */
+    val sentHeaders: MutableMap<String, Map<String, String>> = mutableMapOf()
+
     /** Cuando está a true, toda petición falla. */
     var offline: Boolean = false
 
@@ -37,8 +41,13 @@ class FakeHttpClient(
 
     private val binary: MutableMap<String, ByteArray> = mutableMapOf()
 
-    override suspend fun get(url: String, headers: Map<String, String>): HttpResponse {
+    override suspend fun get(
+        url: String,
+        headers: Map<String, String>,
+        policy: NetworkPolicy,
+    ): HttpResponse {
         requested += url
+        sentHeaders[url] = headers
         if (offline) throw java.io.IOException("sin red")
         binary[url]?.let { return HttpResponse(200, String(it)) }
         val body = responses[url] ?: return HttpResponse(404, "no encontrado")
@@ -49,8 +58,10 @@ class FakeHttpClient(
         url: String,
         body: String?,
         headers: Map<String, String>,
+        policy: NetworkPolicy,
     ): HttpResponse {
         requested += url
+        sentHeaders[url] = headers
         if (offline) throw java.io.IOException("sin red")
         responses[url]?.let { return HttpResponse(200, it) }
         return HttpResponse(404, "no encontrado")
@@ -58,19 +69,28 @@ class FakeHttpClient(
 
     override suspend fun download(
         url: String,
-        target: OutputStream,
+        target: java.io.OutputStream,
         headers: Map<String, String>,
+        policy: NetworkPolicy,
         onProgress: (written: Long, total: Long) -> Unit,
         shouldCancel: () -> Boolean,
     ): DownloadOutcome {
         requested += url
+        sentHeaders[url] = headers
         if (offline) throw java.io.IOException("sin red")
         val bytes = binary[url] ?: responses[url]?.toByteArray() ?: ByteArray(0)
         var written = 0L
         target.write(bytes)
         written += bytes.size
         onProgress(written, bytes.size.toLong())
-        return DownloadOutcome(written, bytes.size.toLong(), "application/octet-stream")
+        return DownloadOutcome(
+            bytesWritten = written,
+            totalBytes = bytes.size.toLong(),
+            contentType = "application/octet-stream",
+            statusCode = 200,
+            expectedBytes = bytes.size.toLong(),
+            finalUrl = url,
+        )
     }
 }
 
