@@ -13,8 +13,12 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -2140,25 +2144,31 @@ private fun PlayerProgressBar(
                         .height(5.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.76f)),
-                )
-                // Mientras se busca la letra, la barra se ilumina: se ve que
-                // hay algo en marcha sin tener que mirar el boton de letras.
-                if (busy) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(5.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color.White.copy(alpha = 0.10f),
-                                        Color.White.copy(alpha = 0.55f),
-                                        Color.White.copy(alpha = 0.10f),
+                ) {
+                    // Mientras se busca la letra, un brillo recorre la barra
+                    // de progreso: se ve que hay algo en marcha sin tener que
+                    // mirar el boton de letras.
+                    if (busy) {
+                        val sweep = rememberSweep()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(46.dp)
+                                .graphicsLayer {
+                                    val travel = size.width + 46.dp.toPx()
+                                    translationX = (sweep * travel) - 46.dp.toPx()
+                                }
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color.Transparent,
+                                            Color.White.copy(alpha = 0.95f),
+                                            Color.Transparent,
+                                        ),
                                     ),
                                 ),
-                            ),
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -2342,6 +2352,27 @@ private fun DirectionalSkipButton(
                 },
         )
     }
+}
+
+/**
+ * El recorrido de la animación de carga, de 0 a 1 y vuelta a empezar.
+ *
+ * Es el mismo movimiento que usa la barra de progreso cuando algo se esta
+ * buscando: un brillo que pasa de un lado a otro.
+ */
+@Composable
+private fun rememberSweep(): Float {
+    val transition = rememberInfiniteTransition(label = "carga")
+    val sweep by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "barrido",
+    )
+    return sweep
 }
 
 /** Fila inferior: letras, aleatorio/repetir y cola. */
