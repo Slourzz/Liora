@@ -138,6 +138,31 @@ class LioraPrefs(context: Context) {
     val lastPlaying: Boolean
         get() = prefs.getBoolean(KEY_LAST_PLAYING, false)
 
+    /**
+     * Los repositorios de extensiones que el usuario ha añadido.
+     *
+     * Cada entrada es la dirección https del `registry.json` de un repositorio
+     * externo. Es lo único que Liora guarda de ellos: el registro y los
+     * paquetes se descargan cuando hacen falta.
+     */
+    var extensionRepositories: List<String>
+        get() = prefs.getStringSet(KEY_EXTENSION_REPOSITORIES, emptySet()).orEmpty().toList()
+        set(value) = prefs.edit()
+            .putStringSet(KEY_EXTENSION_REPOSITORIES, value.toSet())
+            .apply()
+
+    /**
+     * Las extensiones que están desactivadas.
+     *
+     * Una extensión desactivada sigue instalada (su código y sus ajustes se
+     * conservan) pero no aporta ningún proveedor a Liora.
+     */
+    var disabledExtensions: Set<String>
+        get() = prefs.getStringSet(KEY_DISABLED_EXTENSIONS, emptySet()).orEmpty().toSet()
+        set(value) = prefs.edit()
+            .putStringSet(KEY_DISABLED_EXTENSIONS, value.toSet())
+            .apply()
+
     /** Guarda de una sola vez canción, posición y estado de la reproducción. */
     fun savePlayback(songId: Long, positionMs: Long, playing: Boolean) {
         prefs.edit()
@@ -176,6 +201,8 @@ class LioraPrefs(context: Context) {
         private const val KEY_LAST_SONG_ID = "last_song_id"
         private const val KEY_LAST_POSITION_MS = "last_position_ms"
         private const val KEY_LAST_PLAYING = "last_playing"
+        private const val KEY_EXTENSION_REPOSITORIES = "extension_repositories"
+        private const val KEY_DISABLED_EXTENSIONS = "disabled_extensions"
     }
 }
 

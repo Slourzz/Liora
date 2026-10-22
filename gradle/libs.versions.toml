@@ -9,6 +9,9 @@ media3 = "1.10.1"
 haze = "2.0.1"
 backdrop = "2.0.1"
 startup = "1.2.0"
+rhino = "1.7.15.1"
+junit = "4.13.2"
+json = "20231013"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -35,6 +38,14 @@ haze-blur-materials = { group = "dev.chrisbanes.haze", name = "haze-blur-materia
 
 # Backdrop (cristal líquido de Kyant0)
 backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+
+# Motor JavaScript de las extensiones. Rhino es Java puro: sin JNI, sin
+# binarios nativos y con un límite de instrucciones real para los tiempos.
+mozilla-rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
+
+# Pruebas
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+json = { group = "org.json", name = "json", version.ref = "json" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

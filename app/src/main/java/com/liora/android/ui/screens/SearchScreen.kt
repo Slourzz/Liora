@@ -1,5 +1,6 @@
 package com.liora.android.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,10 +42,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.styropyr0.prismal.sources.PrismalGlassLayer
@@ -54,6 +59,7 @@ import com.liora.android.ui.theme.isDark
 import com.liora.android.ui.viewmodel.MusicViewModel
 import com.liora.android.ui.viewmodel.UiState
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.delay
 
 /** Texto de ayuda del campo vacío. */
 private const val SearchHint = "Canciones, artistas o álbumes"
@@ -87,6 +93,8 @@ fun SearchScreen(
     val uiState by viewModel.uiState.collectAsState()
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val providerResults by viewModel.providerResults.collectAsState()
+    val providerSearching by viewModel.providerSearching.collectAsState()
 
     var query by rememberSaveable { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
@@ -109,6 +117,19 @@ fun SearchScreen(
     // El teclado aparece solo: entrar a buscar es querer escribir.
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    // Ademas de la biblioteca, se busca en los proveedores de las extensiones
+    // instaladas: lo que el usuario no tiene en el telefono tambien se puede
+    // buscar. Se espera un poco antes de preguntarles para no llamar a un
+    // proveedor con cada tecla.
+    LaunchedEffect(needle) {
+        if (needle.length >= 2) {
+            delay(450)
+            viewModel.searchProviders(needle)
+        } else {
+            viewModel.searchProviders("")
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -126,10 +147,11 @@ fun SearchScreen(
                     message = "Busca entre ${songs.size} canciones por título, artista o álbum.",
                 )
 
-                results.isEmpty() -> SearchMessage(
-                    title = "Sin resultados",
-                    message = "No hay nada que coincida con «$needle».",
-                )
+                results.isEmpty() && providerResults.isEmpty() && !providerSearching ->
+                    SearchMessage(
+                        title = "Sin resultados",
+                        message = "No hay nada que coincida con «$needle».",
+                    )
 
                 else -> LazyColumn(
                     modifier = Modifier
@@ -148,6 +170,51 @@ fun SearchScreen(
                             isCurrent = song.id == currentSong?.id,
                             isPlaying = isPlaying,
                         )
+                    }
+
+                    if (providerSearching) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Buscando en las extensiones…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    if (providerResults.isNotEmpty()) {
+                        item {
+                            Text(
+                                text = "De las extensiones",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
+                            )
+                        }
+                        items(
+                            items = providerResults,
+                            key = { "ext-${it.providerId}-${it.id}" },
+                        ) { track ->
+                            ProviderRow(
+                                title = track.title,
+                                subtitle = listOf(track.artist, track.album)
+                                    .filter { it.isNotBlank() }
+                                    .joinToString(" • "),
+                                onClick = { viewModel.playProviderTrack(track) },
+                            )
+                        }
                     }
                 }
             }
@@ -253,6 +320,56 @@ private fun SearchField(
                         indication = null,
                     ) { onQueryChange("") },
             )
+        }
+    }
+}
+
+/** Una fila de resultado de un proveedor externo. */
+@Composable
+private fun ProviderRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.CloudDownload,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

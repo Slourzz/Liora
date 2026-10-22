@@ -24,6 +24,8 @@ import com.liora.android.data.model.Song
 import com.liora.android.data.model.toAudioFolders
 import com.liora.android.data.model.withTranslation
 import com.liora.android.data.prefs.LioraPrefs
+import com.liora.android.extensions.ExtensionsService
+import com.liora.android.extensions.model.ProviderTrack
 import com.liora.android.data.repository.MediaRepository
 import com.liora.android.service.PlaybackService
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +89,8 @@ class MusicViewModel(
     private val cache: PlaybackCache,
     private val lyricsRepository: LioraLyricsRepository,
     private val translationRepository: LyricsTranslationRepository,
+    /** El sistema de extensiones: los proveedores que aportan las extensiones. */
+    private val extensions: ExtensionsService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
@@ -166,6 +170,14 @@ class MusicViewModel(
     /** En qué punto está la traducción de la letra actual. */
     private val _lyricsTranslation = MutableStateFlow<LyricsTranslationState>(LyricsTranslationState.Idle)
     val lyricsTranslation: StateFlow<LyricsTranslationState> = _lyricsTranslation.asStateFlow()
+
+    /** Lo que han encontrado los proveedores de las extensiones instaladas. */
+    private val _providerResults = MutableStateFlow<List<ProviderTrack>>(emptyList())
+    val providerResults: StateFlow<List<ProviderTrack>> = _providerResults.asStateFlow()
+
+    /** Verdadero mientras los proveedores están buscando. */
+    private val _providerSearching = MutableStateFlow(false)
+    val providerSearching: StateFlow<Boolean> = _providerSearching.asStateFlow()
 
     /**
      * El error de traducción pendiente de enseñar.
@@ -716,6 +728,65 @@ class MusicViewModel(
         }
         refreshNeighbors()
     }
+
+    /**
+     * Reproduce una pista que viene de un proveedor externo.
+     *
+     * Se le pide al proveedor una fuente con la que se pueda reproducir y se
+     * entrega a Media3, que ya es el motor de la app. Si el proveedor no
+     * tiene esa pista, o su fuente caduca, no se reproduce nada: la app no
+     * se inventa una canción que no está.
+     */
+    fun playProviderTrack(track: ProviderTrack) {
+        viewModelScope.launch {
+            val source = extensions.providers.audioSource(track.id)
+            if (source == null) {
+                Log.i("LioraExt", "El proveedor no tiene fuente para ${track.id}")
+                return@launch
+            }
+            if (source.isExpired()) {
+                Log.i("LioraExt", "La fuente de ${track.id} ha caducado")
+                return@launch
+            }
+            val resolved = extensions.audio.resolve(source)
+            val item = extensions.audio.toMediaItem(resolved, track.id, track.title, track.artist)
+            mediaController?.let { controller ->
+                controller.setMediaItem(item)
+                controller.prepare()
+                controller.play()
+            }
+        }
+    }
+
+    /**
+     * Busca en los proveedores que aportan las extensiones instaladas.
+     *
+     * Es una búsqueda aparte de la de la biblioteca: aquí no hay ficheros
+     * locales, sino lo que el proveedor sepa de ese servicio.
+     */
+    fun searchProviders(query: String) {
+        val needle = query.trim()
+        if (needle.length < 2) {
+            _providerResults.value = emptyList()
+            return
+        }
+        providerSearchJob?.cancel()
+        providerSearchJob = viewModelScope.launch {
+            _providerSearching.value = true
+            val results = runCatching {
+                extensions.providers.searchTracks(needle, 20)
+            }.getOrDefault(emptyList())
+            _providerResults.value = results
+            _providerSearching.value = false
+        }
+    }
+
+    /** La pista del proveedor que está sonando, si la hay. */
+    val _providerTrack = MutableStateFlow<ProviderTrack?>(null)
+    val providerTrack: StateFlow<ProviderTrack?> = _providerTrack.asStateFlow()
+
+    /** Cancela la búsqueda en curso en los proveedores. */
+    private var providerSearchJob: Job? = null
 
     fun togglePlayPause() {
         mediaController?.let { controller ->

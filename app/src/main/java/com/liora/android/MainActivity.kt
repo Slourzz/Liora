@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.liora.android.data.cache.PlaybackCache
 import com.liora.android.data.identification.SongIdentificationRepository
 import com.liora.android.data.lyrics.AppleMusicLyricsRepository
@@ -20,8 +21,10 @@ import com.liora.android.data.lyrics.LyricsTranslationRepository
 import com.liora.android.data.lyrics.SpicyLyricsRepository
 import com.liora.android.data.prefs.LioraPrefs
 import com.liora.android.data.repository.MediaRepository
+import com.liora.android.extensions.ExtensionsService
 import com.liora.android.ui.LioraApp
 import com.liora.android.ui.viewmodel.MusicViewModel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -44,9 +47,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val repository = MediaRepository(applicationContext)
+        val prefs = LioraPrefs(applicationContext)
+        // El sistema de extensiones: el motor, el instalador y el registro de
+        // proveedores. Las extensiones ya instaladas se cargan al abrir la app.
+        val extensions = ExtensionsService(applicationContext, prefs)
         viewModel = MusicViewModel(
             repository = repository,
-            prefs = LioraPrefs(applicationContext),
+            prefs = prefs,
             cache = PlaybackCache(applicationContext),
             lyricsRepository = LioraLyricsRepository(
                 spicyLyrics = SpicyLyricsRepository(applicationContext),
@@ -55,8 +62,13 @@ class MainActivity : ComponentActivity() {
                 store = LyricsStore(applicationContext),
             ),
             translationRepository = LyricsTranslationRepository(applicationContext),
+            extensions = extensions,
         )
         viewModel.initializeMediaController(this)
+
+        lifecycleScope.launch {
+            runCatching { extensions.loadInstalled() }
+        }
 
         audioPermissionState.value = checkAudioPermission()
         if (audioPermissionState.value) {
@@ -67,6 +79,7 @@ class MainActivity : ComponentActivity() {
             val hasPermission by audioPermissionState
             LioraApp(
                 viewModel = viewModel,
+                extensions = extensions,
                 hasPermission = hasPermission,
                 onRequestPermissions = { requestPermissions() },
             )

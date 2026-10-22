@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -67,6 +68,7 @@ import com.liora.android.data.model.AudioFolder
 import com.liora.android.data.prefs.AppStyle
 import com.liora.android.data.prefs.AppThemeMode
 import com.liora.android.data.prefs.LioraPrefs
+import com.liora.android.extensions.ExtensionsService
 import com.liora.android.data.prefs.LyricAnimationLevel
 import com.liora.android.data.prefs.PlayerBackground
 import com.liora.android.ui.components.GlassSwitch
@@ -86,6 +88,8 @@ private val SectionShape = RoundedCornerShape(24.dp)
 @Composable
 fun SettingsScreen(
     viewModel: MusicViewModel,
+    extensions: ExtensionsService,
+    onOpenExtensions: () -> Unit,
     liquidGlass: Boolean,
     appStyle: AppStyle,
     themeMode: AppThemeMode,
@@ -93,7 +97,7 @@ fun SettingsScreen(
     onThemeModeChange: (AppThemeMode) -> Unit,
     backgroundStyle: PlayerBackground,
     onBackgroundStyleChange: (PlayerBackground) -> Unit,
-    /** Nivel de animación de las letras: Simple, Normal o Exagerada. */
+    /** Nivel de animaciÃ³n de las letras: Simple, Normal o Exagerada. */
     lyricsAnimationLevel: LyricAnimationLevel,
     onLyricsAnimationLevelChange: (LyricAnimationLevel) -> Unit,
     backdrop: PrismalGlassLayer,
@@ -203,6 +207,12 @@ fun SettingsScreen(
                     onOpenBackgroundPicker = { showBackgroundDialog = true },
                 )
 
+                ExtensionsEntry(
+                    installedCount = extensions.installedEntries().size,
+                    repositoryCount = extensions.repositories().size,
+                    onOpen = onOpenExtensions,
+                )
+
                 LyricsSection(
                     animationLevel = lyricsAnimationLevel,
                     liquidGlass = liquidGlass,
@@ -228,7 +238,7 @@ fun SettingsScreen(
                                     if (folderCount < 0) {
                                         "No se pudieron leer las carpetas"
                                     } else {
-                                        "$folderCount carpetas · $songCount canciones"
+                                        "$folderCount carpetas Â· $songCount canciones"
                                     }
                                 )
                             }
@@ -289,7 +299,7 @@ fun SettingsScreen(
                     viewModel.setCacheMaxMb(mb)
                     showCacheDialog = false
                     scope.launch {
-                        snackbarHostState.showSnackbar("Caché: ${LioraPrefs.cacheSizeLabel(mb)}")
+                        snackbarHostState.showSnackbar("CachÃ©: ${LioraPrefs.cacheSizeLabel(mb)}")
                     }
                 },
                 onDismiss = { showCacheDialog = false },
@@ -302,8 +312,8 @@ fun SettingsScreen(
                 title = { Text("Borrar las letras guardadas") },
                 text = {
                     Text(
-                        "Se borrarán las letras de $storedLyricsCount canciones. " +
-                            "La próxima vez que suenen, se buscarán otra vez.",
+                        "Se borrarÃ¡n las letras de $storedLyricsCount canciones. " +
+                            "La prÃ³xima vez que suenen, se buscarÃ¡n otra vez.",
                     )
                 },
                 confirmButton = {
@@ -362,7 +372,7 @@ private fun PersonalizationSection(
     iconStyle: IconStyle,
     onOpenIconPicker: () -> Unit,
 ) {
-    SettingsSection(title = "Personalización") {
+    SettingsSection(title = "PersonalizaciÃ³n") {
         ListItem(
             headlineContent = { Text("Logo de la app") },
             supportingContent = {
@@ -397,7 +407,54 @@ private fun PersonalizationSection(
 }
 
 /**
- * Sección "Diseño": el estilo visual de Liora (solo uno a la vez) y el modo de
+ * La entrada a la secciÃ³n de extensiones: cuÃ¡ntos repositorios hay aÃ±adidos y
+ * cuÃ¡ntas extensiones estÃ¡n instaladas.
+ */
+@Composable
+private fun ExtensionsEntry(
+    installedCount: Int,
+    repositoryCount: Int,
+    onOpen: () -> Unit,
+) {
+    SettingsSection(title = "Extensiones") {
+        ListItem(
+            headlineContent = { Text("Extensiones") },
+            supportingContent = {
+                Text(
+                    text = if (repositoryCount == 0 && installedCount == 0) {
+                        "AÃ±ade un repositorio para instalar proveedores"
+                    } else {
+                        "$repositoryCount repositorios Â· $installedCount instaladas"
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            leadingContent = {
+                Icon(
+                    imageVector = Icons.Rounded.Extension,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp),
+                )
+            },
+            trailingContent = {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            modifier = Modifier
+                .clip(SectionShape)
+                .clickable(onClick = onOpen),
+        )
+    }
+}
+
+/**
+ * SecciÃ³n "DiseÃ±o": el estilo visual de Liora (solo uno a la vez) y el modo de
  * tema de la app.
  */
 @Composable
@@ -407,7 +464,7 @@ private fun DesignSection(
     onAppStyleChange: (AppStyle) -> Unit,
     onOpenThemePicker: () -> Unit,
 ) {
-    SettingsSection(title = "Diseño") {
+    SettingsSection(title = "DiseÃ±o") {
         AppStyle.entries.forEach { style ->
             ListItem(
                 headlineContent = { Text(styleTitle(style)) },
@@ -451,23 +508,23 @@ private fun DesignSection(
 /** Nombre visible de cada estilo visual. */
 private fun styleTitle(style: AppStyle): String = when (style) {
     AppStyle.Material -> "Material You"
-    AppStyle.Dynamic -> "Dinámico"
+    AppStyle.Dynamic -> "DinÃ¡mico"
     AppStyle.Glass -> "Glass"
 }
 
-/** Explicación corta de cada estilo visual. */
+/** ExplicaciÃ³n corta de cada estilo visual. */
 private fun styleDescription(style: AppStyle): String = when (style) {
     AppStyle.Material -> "El aspecto de siempre, con los colores del sistema."
     AppStyle.Dynamic ->
-        "Toma los colores de la portada de la canción actual y los cambia " +
+        "Toma los colores de la portada de la canciÃ³n actual y los cambia " +
             "con un degradado suave."
     AppStyle.Glass ->
-        "Cristal líquido: navegación, barra de música y controles con refracción."
+        "Cristal lÃ­quido: navegaciÃ³n, barra de mÃºsica y controles con refracciÃ³n."
 }
 
 /** Nombre visible de cada modo de tema. */
 private fun themeModeLabel(mode: AppThemeMode): String = when (mode) {
-    AppThemeMode.System -> "Según el sistema"
+    AppThemeMode.System -> "SegÃºn el sistema"
     AppThemeMode.Light -> "Claro"
     AppThemeMode.Dark -> "Oscuro"
 }
@@ -475,27 +532,27 @@ private fun themeModeLabel(mode: AppThemeMode): String = when (mode) {
 /** Nombre visible de cada fondo del reproductor. */
 private fun backgroundStyleLabel(style: PlayerBackground): String = when (style) {
     PlayerBackground.Kawarp -> "Kawarp"
-    PlayerBackground.Solid -> "Sólido"
+    PlayerBackground.Solid -> "SÃ³lido"
 }
 
-/** Explicación corta de cada fondo del reproductor. */
+/** ExplicaciÃ³n corta de cada fondo del reproductor. */
 private fun backgroundStyleDescription(style: PlayerBackground): String = when (style) {
     PlayerBackground.Kawarp ->
-        "La portada hecha manchas de color, meciéndose despacio mientras suena " +
-            "la música."
+        "La portada hecha manchas de color, meciÃ©ndose despacio mientras suena " +
+            "la mÃºsica."
     PlayerBackground.Solid ->
-        "Un único color sacado de la portada, sin degradado ni movimiento."
+        "Un Ãºnico color sacado de la portada, sin degradado ni movimiento."
 }
 
 /**
- * Sección "Diseño del reproductor": cómo se viste el reproductor completo.
+ * SecciÃ³n "DiseÃ±o del reproductor": cÃ³mo se viste el reproductor completo.
  */
 @Composable
 private fun PlayerDesignSection(
     backgroundStyle: PlayerBackground,
     onOpenBackgroundPicker: () -> Unit,
 ) {
-    SettingsSection(title = "Diseño del reproductor") {
+    SettingsSection(title = "DiseÃ±o del reproductor") {
         ListItem(
             headlineContent = { Text("Estilo del fondo") },
             supportingContent = { Text(backgroundStyleLabel(backgroundStyle)) },
@@ -514,7 +571,7 @@ private fun PlayerDesignSection(
     }
 }
 
-/** Nombre en español de cada nivel de animación de las letras. */
+/** Nombre en espaÃ±ol de cada nivel de animaciÃ³n de las letras. */
 private fun lyricsAnimationLabel(level: LyricAnimationLevel): String = when (level) {
     LyricAnimationLevel.Simple -> "Simple"
 
@@ -531,14 +588,14 @@ private fun LyricsSection(
     onLevelChange: (LyricAnimationLevel) -> Unit,
 ) {
     /*
-     * El slider tiene 3 paradas —Simple, Normal, Exagerada—, en el orden
+     * El slider tiene 3 paradas â€”Simple, Normal, Exageradaâ€”, en el orden
      * natural del nivel: 0 apaga la ola, 2 la dispara con todo. Solo el
      * estilo Glass lleva el material de Prismal; el resto usa el Slider
      * de Material sin ruido.
      */
     SettingsSection(title = "Letras") {
         ListItem(
-            headlineContent = { Text("Animación de letras") },
+            headlineContent = { Text("AnimaciÃ³n de letras") },
             supportingContent = {
                 Column {
                     Text(lyricsAnimationLabel(animationLevel))
@@ -616,7 +673,7 @@ private fun StorageSection(
             supportingContent = {
                 Text(
                     if (totalFolders == 0) {
-                        "Todavía no hay carpetas leídas"
+                        "TodavÃ­a no hay carpetas leÃ­das"
                     } else {
                         "$activeFolders de $totalFolders carpetas activas"
                     },
@@ -644,7 +701,7 @@ private fun StorageSection(
             headlineContent = { Text("Filtrar sonidos del sistema") },
             supportingContent = {
                 Text(
-                    "Oculta alarmas, timbres y avisos del teléfono que se cuelan " +
+                    "Oculta alarmas, timbres y avisos del telÃ©fono que se cuelan " +
                         "en la biblioteca.",
                 )
             },
@@ -676,7 +733,7 @@ private fun StorageSection(
             headlineContent = { Text("Leer carpetas") },
             supportingContent = {
                 Text(
-                    "Vuelve a leer el teléfono: encuentra audios nuevos y " +
+                    "Vuelve a leer el telÃ©fono: encuentra audios nuevos y " +
                         "respeta las carpetas excluidas.",
                 )
             },
@@ -706,11 +763,11 @@ private fun StorageSection(
         )
 
         ListItem(
-            headlineContent = { Text("Caché de reproducción") },
+            headlineContent = { Text("CachÃ© de reproducciÃ³n") },
             supportingContent = {
                 Text(
-                    "Actualmente $cacheUsageLabel · " +
-                        "Máximo ${LioraPrefs.cacheSizeLabel(cacheMaxMb)}",
+                    "Actualmente $cacheUsageLabel Â· " +
+                        "MÃ¡ximo ${LioraPrefs.cacheSizeLabel(cacheMaxMb)}",
                 )
             },
             trailingContent = {
@@ -736,9 +793,9 @@ private fun StorageSection(
             supportingContent = {
                 Text(
                     if (storedLyricsCount == 0) {
-                        "Todavía no hay ninguna letra guardada"
+                        "TodavÃ­a no hay ninguna letra guardada"
                     } else {
-                        "$storedLyricsCount canciones con su letra · " +
+                        "$storedLyricsCount canciones con su letra Â· " +
                             "Toca para borrarlas"
                     },
                 )
@@ -770,8 +827,8 @@ private fun FolderPicker(
     liquidGlass: Boolean,
 ) {
     Text(
-        text = "Elige qué carpetas puede reproducir Liora. Las que apagues no " +
-            "aparecen en las listas ni entran en la cola de reproducción.",
+        text = "Elige quÃ© carpetas puede reproducir Liora. Las que apagues no " +
+            "aparecen en las listas ni entran en la cola de reproducciÃ³n.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
@@ -779,7 +836,7 @@ private fun FolderPicker(
 
     if (folders.isEmpty()) {
         Text(
-            text = "Todavía no se encontraron carpetas con audio.",
+            text = "TodavÃ­a no se encontraron carpetas con audio.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 22.dp, vertical = 16.dp),
@@ -798,7 +855,7 @@ private fun FolderPicker(
                 supportingContent = {
                     Text(
                         text = "${folder.songCount} " +
-                            "${if (folder.songCount == 1) "canción" else "canciones"} · " +
+                            "${if (folder.songCount == 1) "canciÃ³n" else "canciones"} Â· " +
                             prettyPath(folder.path),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -833,13 +890,13 @@ private fun FolderPicker(
     }
 }
 
-/** Resumen corto de una ruta larga: "…/emulated/0/Download". */
+/** Resumen corto de una ruta larga: "â€¦/emulated/0/Download". */
 private fun prettyPath(path: String): String {
     val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
-    return if (parts.size <= 3) path else "…/" + parts.takeLast(3).joinToString("/")
+    return if (parts.size <= 3) path else "â€¦/" + parts.takeLast(3).joinToString("/")
 }
 
-/** Selector del tamaño máximo de la caché de reproducción. */
+/** Selector del tamaÃ±o mÃ¡ximo de la cachÃ© de reproducciÃ³n. */
 @Composable
 private fun CacheSizeDialog(
     currentMb: Int,
@@ -849,12 +906,12 @@ private fun CacheSizeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Caché de reproducción") },
+        title = { Text("CachÃ© de reproducciÃ³n") },
         text = {
             Column {
                 Text(
-                    text = "Máximo de espacio que Liora puede usar para copias " +
-                        "temporales de la música. Ahora mismo ocupa $usageLabel.",
+                    text = "MÃ¡ximo de espacio que Liora puede usar para copias " +
+                        "temporales de la mÃºsica. Ahora mismo ocupa $usageLabel.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -886,7 +943,7 @@ private fun CacheSizeDialog(
     )
 }
 
-/** Selector del modo de tema: según el sistema, claro u oscuro. */
+/** Selector del modo de tema: segÃºn el sistema, claro u oscuro. */
 @Composable
 private fun ThemeModeDialog(
     current: AppThemeMode,
@@ -899,7 +956,7 @@ private fun ThemeModeDialog(
         text = {
             Column {
                 Text(
-                    text = "Elige si Liora sigue el modo del teléfono o si se ve " +
+                    text = "Elige si Liora sigue el modo del telÃ©fono o si se ve " +
                         "siempre clara u oscura.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -932,7 +989,7 @@ private fun ThemeModeDialog(
     )
 }
 
-/** Selector del fondo del reproductor: el campo vivo o un único color. */
+/** Selector del fondo del reproductor: el campo vivo o un Ãºnico color. */
 @Composable
 private fun BackgroundStyleDialog(
     current: PlayerBackground,
@@ -945,7 +1002,7 @@ private fun BackgroundStyleDialog(
         text = {
             Column {
                 Text(
-                    text = "Elige qué se ve detrás de la portada en el reproductor.",
+                    text = "Elige quÃ© se ve detrÃ¡s de la portada en el reproductor.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -991,7 +1048,7 @@ private fun AboutSection(
 ) {
     SettingsSection(title = "Acerca de") {
         ListItem(
-            headlineContent = { Text("Versión") },
+            headlineContent = { Text("VersiÃ³n") },
             supportingContent = { Text(versionName) },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier.clip(SectionShape),
@@ -1004,7 +1061,7 @@ private fun AboutSection(
 
         ListItem(
             headlineContent = { Text("Licencia") },
-            supportingContent = { Text("AGPL-3.0 · software libre") },
+            supportingContent = { Text("AGPL-3.0 Â· software libre") },
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier.clip(SectionShape),
         )
@@ -1065,7 +1122,7 @@ private fun IconPicker(
     onSelect: (IconStyle) -> Unit,
 ) {
     Text(
-        text = "Elige cómo quieres que se vea Liora en tu launcher. " +
+        text = "Elige cÃ³mo quieres que se vea Liora en tu launcher. " +
             "Algunos lanzadores tardan unos segundos en refrescar el icono.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -75,6 +75,8 @@ import com.liora.android.ui.player.PlayerPanelSpec
 import com.liora.android.ui.screens.HomeScreen
 import com.liora.android.ui.screens.LibraryScreen
 import com.liora.android.ui.screens.SearchScreen
+import com.liora.android.extensions.ExtensionsService
+import com.liora.android.ui.screens.ExtensionsScreen
 import com.liora.android.ui.screens.SettingsScreen
 import com.liora.android.ui.theme.LioraSystemBars
 import com.liora.android.ui.theme.LioraTheme
@@ -108,6 +110,7 @@ private val SimpleBottomAreaWithPlayerHeight = MiniPlayerHeight + SimpleNavBarHe
 @Composable
 fun LioraApp(
     viewModel: MusicViewModel,
+    extensions: ExtensionsService,
     hasPermission: Boolean,
     onRequestPermissions: () -> Unit,
 ) {
@@ -143,6 +146,7 @@ fun LioraApp(
 
         LioraAppContent(
             viewModel = viewModel,
+            extensions = extensions,
             hasPermission = hasPermission,
             onRequestPermissions = onRequestPermissions,
             appStyle = appStyle,
@@ -182,6 +186,7 @@ fun LioraApp(
 @Composable
 private fun LioraAppContent(
     viewModel: MusicViewModel,
+    extensions: ExtensionsService,
     hasPermission: Boolean,
     onRequestPermissions: () -> Unit,
     appStyle: AppStyle,
@@ -200,6 +205,10 @@ private fun LioraAppContent(
     val liquidGlass = appStyle == AppStyle.Glass && PrismalGlass.isSupported()
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
+
+    // La seccion de extensiones ocupa la pantalla entera: su catalogo puede
+    // ser largo y no cabe dentro del scroll de Ajustes.
+    var showExtensions by rememberSaveable { mutableStateOf(false) }
 
     /** El reproductor completo se despliega al tocar el mini reproductor. */
     var playerOpen by rememberSaveable { mutableStateOf(false) }
@@ -284,14 +293,21 @@ private fun LioraAppContent(
         selectedIndex = tab.ordinal
     }
 
-    BackHandler(enabled = searchOpen) { searchOpen = false }
+    BackHandler(enabled = searchOpen || showExtensions) {
+        if (showExtensions) showExtensions = false else searchOpen = false
+    }
 
     // Cambiar de pantalla devuelve la lista arriba, así que el área inferior
     // vuelve a su sitio: si no, quedaría comprimida sin nada que lo explique.
-    LaunchedEffect(selectedTab, searchOpen) { collapseController.expand() }
+    LaunchedEffect(selectedTab, searchOpen, showExtensions) { collapseController.expand() }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (searchOpen) {
+        if (showExtensions) {
+            ExtensionsScreen(
+                service = extensions,
+                onBack = { showExtensions = false },
+            )
+        } else if (searchOpen) {
             SearchScreen(
                 viewModel = viewModel,
                 liquidGlass = liquidGlass,
@@ -324,6 +340,8 @@ private fun LioraAppContent(
 
                 LioraTab.Settings -> SettingsScreen(
                     viewModel = viewModel,
+                    extensions = extensions,
+                    onOpenExtensions = { showExtensions = true },
                     liquidGlass = liquidGlass,
                     appStyle = appStyle,
                     themeMode = themeMode,

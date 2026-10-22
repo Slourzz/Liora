@@ -60,4 +60,14 @@ dependencies {
     // PrismalAGSL (material óptico del cristal). El material de Kyant0 queda
     // conservado en la rama backup/kyant0-material-20261019.
     implementation(project(":prismal"))
+
+    // Runtime JavaScript de las extensiones externas. Rhino es Java puro
+    // (MPL-2.0): no añade JNI ni binarios nativos, y su límite de
+    // instrucciones da un tiempo de ejecución real por llamada.
+    implementation(libs.mozilla.rhino)
+
+    testImplementation(libs.junit)
+    // org.json real para las pruebas unitarias: en la JVM el android.jar
+    // solo trae los stubs que lanzan al usarse.
+    testImplementation(libs.json)
 }
