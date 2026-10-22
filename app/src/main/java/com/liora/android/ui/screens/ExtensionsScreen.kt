@@ -71,6 +71,7 @@ private val SectionShape = RoundedCornerShape(24.dp)
 fun ExtensionsScreen(
     service: ExtensionsService,
     onBack: () -> Unit,
+    bottomPadding: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -101,7 +102,7 @@ fun ExtensionsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(top = 92.dp, bottom = 24.dp),
+            .padding(top = 92.dp, bottom = 92.dp + bottomPadding),
     ) {
         Row(
             modifier = Modifier

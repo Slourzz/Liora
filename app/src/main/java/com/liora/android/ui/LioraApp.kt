@@ -236,6 +236,7 @@ private fun LioraAppContent(
     val lyricsTranslation by viewModel.lyricsTranslation.collectAsState()
     val lyricsTranslationVisible by viewModel.lyricsTranslationVisible.collectAsState()
     val translationError by viewModel.translationError.collectAsState()
+    val streamMatch by viewModel.streamMatch.collectAsState()
 
     /** Altura a la que reposa la barra del mini reproductor, en píxeles. */
     var miniTopPx by remember { mutableStateOf(0f) }
@@ -306,6 +307,7 @@ private fun LioraAppContent(
             ExtensionsScreen(
                 service = extensions,
                 onBack = { showExtensions = false },
+                bottomPadding = bottomPadding,
             )
         } else if (searchOpen) {
             SearchScreen(
@@ -520,6 +522,8 @@ private fun LioraAppContent(
                                 previousSong = neighbors.previous,
                                 nextSong = neighbors.next,
                                 playWhenReady = playWhenReady,
+                                streamMatch = streamMatch?.track,
+                                onPlayStream = { viewModel.playStreamOf(song) },
                                 progressFraction = playbackProgress.fraction,
                                 collapseProgress = collapse,
                                 onTogglePlay = { viewModel.togglePlayPause() },

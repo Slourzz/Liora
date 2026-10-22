@@ -3,6 +3,7 @@ package com.liora.android.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -47,6 +48,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -73,13 +75,22 @@ private val SearchFieldHeight = 52.dp
 /** Lo que hay que bajar la lista para no quedar debajo del campo. */
 private val SearchContentTop = SearchFieldTop + SearchFieldHeight + 12.dp
 
+/** El alto de la fila de filtros, debajo del campo. */
+private val ScopeBarHeight = 48.dp
+
+/** Qué se está buscando: en el telefono o en todo lo que dan los proveedores. */
+private enum class SearchScope(val label: String) {
+    LIBRARY("Biblioteca"),
+    GLOBAL("Global"),
+}
+
 /**
  * Pantalla de búsqueda: filtra la biblioteca por título, artista o álbum
- * mientras se escribe.
+ * mientras se escribe, y además busca en los proveedores de las extensiones.
  *
- * El campo de búsqueda es un cristal **fuera** de la capa de contenido (igual
- * que la barra superior): si estuviera dentro se copiaría a sí mismo y el
- * grafo de dibujo de Android se volvería cíclico.
+ * Abajo del campo hay dos filtros: **Biblioteca** (lo que hay en el teléfono)
+ * y **Global** (lo que devuelven los proveedores externos, que se puede
+ * reproducir aunque la canción no esté descargada).
  */
 @Composable
 fun SearchScreen(
@@ -97,6 +108,7 @@ fun SearchScreen(
     val providerSearching by viewModel.providerSearching.collectAsState()
 
     var query by rememberSaveable { mutableStateOf("") }
+    var scope by rememberSaveable { mutableStateOf(SearchScope.LIBRARY) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -121,8 +133,8 @@ fun SearchScreen(
     // instaladas: lo que el usuario no tiene en el telefono tambien se puede
     // buscar. Se espera un poco antes de preguntarles para no llamar a un
     // proveedor con cada tecla.
-    LaunchedEffect(needle) {
-        if (needle.length >= 2) {
+    LaunchedEffect(needle, scope) {
+        if (scope == SearchScope.GLOBAL && needle.length >= 2) {
             delay(450)
             viewModel.searchProviders(needle)
         } else {
@@ -142,34 +154,50 @@ fun SearchScreen(
                     message = "Concede el permiso de audio y vuelve a intentarlo.",
                 )
 
-                needle.isEmpty() -> SearchMessage(
+                scope == SearchScope.LIBRARY && needle.isEmpty() -> SearchMessage(
                     title = "¿Qué quieres escuchar?",
                     message = "Busca entre ${songs.size} canciones por título, artista o álbum.",
                 )
 
-                results.isEmpty() && providerResults.isEmpty() && !providerSearching ->
+                scope == SearchScope.GLOBAL && needle.isEmpty() -> SearchMessage(
+                    title = "Buscar en todo",
+                    message = "Busca en los proveedores que hayas instalado: " +
+                        "las canciones que no tienes descargadas también se pueden reproducir.",
+                )
+
+                scope == SearchScope.LIBRARY && results.isEmpty() -> SearchMessage(
+                    title = "Sin resultados",
+                    message = "No hay nada que coincida con «$needle».",
+                )
+
+                scope == SearchScope.GLOBAL && providerResults.isEmpty() && !providerSearching ->
                     SearchMessage(
                         title = "Sin resultados",
-                        message = "No hay nada que coincida con «$needle».",
+                        message = "Ningún proveedor ha encontrado «$needle».",
                     )
 
                 else -> LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .nestedScroll(collapseConnection),
-                    contentPadding = PaddingValues(top = SearchContentTop, bottom = bottomPadding),
+                    contentPadding = PaddingValues(
+                        top = SearchContentTop + ScopeBarHeight,
+                        bottom = bottomPadding,
+                    ),
                 ) {
-                    items(
-                        items = results,
-                        key = { it.id },
-                    ) { song ->
-                        SongRow(
-                            song = song,
-                            onClick = { viewModel.playSong(song) },
-                            subtitle = song.subtitle,
-                            isCurrent = song.id == currentSong?.id,
-                            isPlaying = isPlaying,
-                        )
+                    if (scope == SearchScope.LIBRARY) {
+                        items(
+                            items = results,
+                            key = { it.id },
+                        ) { song ->
+                            SongRow(
+                                song = song,
+                                onClick = { viewModel.playSong(song) },
+                                subtitle = song.subtitle,
+                                isCurrent = song.id == currentSong?.id,
+                                isPlaying = isPlaying,
+                            )
+                        }
                     }
 
                     if (providerSearching) {
@@ -186,7 +214,7 @@ fun SearchScreen(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    text = "Buscando en las extensiones…",
+                                    text = "Buscando en los proveedores…",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -197,7 +225,7 @@ fun SearchScreen(
                     if (providerResults.isNotEmpty()) {
                         item {
                             Text(
-                                text = "De las extensiones",
+                                text = if (scope == SearchScope.GLOBAL) "De los proveedores" else "De las extensiones",
                                 style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp),
@@ -241,6 +269,71 @@ fun SearchScreen(
             hazeState = hazeState,
             modifier = Modifier.align(Alignment.TopCenter),
         )
+
+        // Los dos filtros, justo debajo del campo.
+        ScopeBar(
+            scope = scope,
+            onSelect = { scope = it },
+            liquidGlass = liquidGlass,
+            backdrop = backdrop,
+            hazeState = hazeState,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = SearchContentTop - 4.dp, start = 16.dp, end = 16.dp),
+        )
+    }
+}
+
+/** La fila de filtros: biblioteca o todo. */
+@Composable
+private fun ScopeBar(
+    scope: SearchScope,
+    onSelect: (SearchScope) -> Unit,
+    liquidGlass: Boolean,
+    backdrop: PrismalGlassLayer,
+    hazeState: HazeState,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .lioraGlass(
+                liquidGlass = liquidGlass,
+                backdrop = backdrop,
+                hazeState = hazeState,
+                surfaceColor = if (MaterialTheme.colorScheme.isDark) {
+                    Color(0xFF121212).copy(alpha = 0.24f)
+                } else {
+                    Color(0xFFFAFAFA).copy(alpha = 0.34f)
+                },
+                shape = RoundedCornerShape(20.dp),
+                showShadow = false,
+            )
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        SearchScope.entries.forEach { option ->
+            val selected = option == scope
+            Text(
+                text = option.label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    )
+                    .clickable { onSelect(option) }
+                    .padding(vertical = 8.dp),
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 

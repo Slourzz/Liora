@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -134,6 +135,13 @@ fun MiniPlayer(
     progressFraction: Float,
     collapseProgress: Float,
     onTogglePlay: () -> Unit,
+    /**
+     * La pista que un proveedor externo tiene de esta cancion, si la hay.
+     * Con ella, la barra ofrece el stream sin tener que buscar nada.
+     */
+    streamMatch: com.liora.android.extensions.model.ProviderTrack? = null,
+    /** Pone a sonar la version en streaming de la cancion. */
+    onPlayStream: (() -> Unit)? = null,
     onPrevious: () -> Unit,
     onPreviousSong: () -> Unit,
     onNext: () -> Unit,
@@ -619,6 +627,10 @@ private fun MiniPlayerInfoRow(
     collapse: Float,
     translationX: () -> Float,
     artworkModifier: Modifier = Modifier,
+    /** Si un proveedor externo tiene esta cancion, se ofrece su stream. */
+    streamMatch: com.liora.android.extensions.model.ProviderTrack? = null,
+    /** Pone a sonar la version en streaming. */
+    onPlayStream: (() -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -677,6 +689,22 @@ private fun MiniPlayerInfoRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // Cuando un proveedor externo tiene esta cancion, aparece el
+            // atajo al stream: no hay que buscar nada, esta ya resuelta.
+            if (streamMatch != null && onPlayStream != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Escuchar en streaming",
+                    fontSize = (11f - 1f * collapse).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onPlayStream() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
     }
 }

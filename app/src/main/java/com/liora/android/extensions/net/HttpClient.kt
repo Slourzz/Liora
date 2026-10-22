@@ -161,8 +161,8 @@ interface HttpClient {
  * no viaja detrás de una redirección a otro sitio.
  */
 class UrlConnectionHttpClient(
-    private val connectTimeoutMs: Int = 15_000,
-    private val readTimeoutMs: Int = 30_000,
+    private val connectTimeoutMs: Int = 20_000,
+    private val readTimeoutMs: Int = 60_000,
 ) : HttpClient {
 
     override suspend fun get(

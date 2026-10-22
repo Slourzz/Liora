@@ -453,8 +453,15 @@ class JsExtensionRuntime(
     }
 
     companion object {
-        /** El plazo por defecto de una llamada a un proveedor. */
-        const val DEFAULT_TIMEOUT_MS = 20_000L
+        /**
+         * El plazo por defecto de una llamada a un proveedor.
+         *
+         * Es holgado a proposito: las busquedas de los proveedoresdevuelven
+         * listas grandes y en una conexion lenta se puede pasar de veinte
+         * segundos. El script sigue teniendo limite de instrucciones, asi que
+         * un bucle infinito no se cuela por aqui.
+         */
+        const val DEFAULT_TIMEOUT_MS = 45_000L
 
         /** La holgura antes de dar la llamada por perdida. */
         private const val GRACE_MS = 2_000L

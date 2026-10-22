@@ -733,6 +733,59 @@ class MusicViewModel(
             controller.play()
         }
         refreshNeighbors()
+        // Y en segundo plano se busca la misma cancion en los proveedores
+        // externos: si la hay, el reproductor ofrece el stream sin que haya
+        // que buscar nada a mano.
+        resolveStreamFor(song)
+    }
+
+    /**
+     * Busca la canción local en los proveedores externos.
+     *
+     * Va en segundo plano: la musica local suena igual, y cuando el
+     * proveedor encuentra la pista, la app tiene lista la fuente de streaming
+     * para ofrecerla con un toque.
+     */
+    private fun resolveStreamFor(song: Song) {
+        if (extensions.registry.all().none { it.enabled }) return
+        viewModelScope.launch {
+            val match = runCatching { extensions.providers.resolveSong(song) }.getOrNull()
+            if (match != null) {
+                _streamMatch.value = StreamMatch(song.id, match)
+            }
+        }
+    }
+
+    /** La pista que un proveedor externo tiene de una cancion local. */
+    data class StreamMatch(val songId: Long, val track: ProviderTrack)
+
+    private val _streamMatch = MutableStateFlow<StreamMatch?>(null)
+    val streamMatch: StateFlow<StreamMatch?> = _streamMatch.asStateFlow()
+
+    /**
+     * Reproduce la versión en streaming de la canción que suena.
+     *
+     * Busca la pista en los proveedores (si aún no está) y, cuando la
+     * encuentra, reproduce su fuente. Si el proveedor no la tiene, no se
+     * cambia nada: sigue sonando el archivo local.
+     */
+    fun playStreamOf(song: Song) {
+        viewModelScope.launch {
+            val match = _streamMatch.value?.takeIf { it.songId == song.id }?.track
+                ?: runCatching { extensions.providers.resolveSong(song) }.getOrNull()
+            if (match == null) return@launch
+            val source = extensions.providers.audioSource(match.id) ?: return@launch
+            if (source.isExpired()) return@launch
+            val resolved = extensions.audio.resolve(source)
+            val item = extensions.audio.toMediaItem(resolved, match.id, match.title, match.artist)
+            mediaController?.let { controller ->
+                controller.setMediaItem(item)
+                controller.prepare()
+                controller.play()
+            }
+            _providerTrack.value = match
+            _currentSong.value = match.asSong()
+        }
     }
 
     /**
