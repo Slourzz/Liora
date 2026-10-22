@@ -214,7 +214,7 @@ fun SearchScreen(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    text = "Buscando en los proveedores…",
+                                    text = "Buscando en los proveedores… (con redes lentas puede tardar)",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

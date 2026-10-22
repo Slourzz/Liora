@@ -162,7 +162,7 @@ interface HttpClient {
  */
 class UrlConnectionHttpClient(
     private val connectTimeoutMs: Int = 20_000,
-    private val readTimeoutMs: Int = 60_000,
+    private val readTimeoutMs: Int = 90_000,
 ) : HttpClient {
 
     override suspend fun get(
