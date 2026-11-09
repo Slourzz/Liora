@@ -77,13 +77,13 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 - [x] Compilación del proyecto (AGP 9 + Kotlin integrado)
 - [x] Lectura de la biblioteca local
 - [x] Reproducción en segundo plano
-- [ ] **Cola de reproducción**: siguiente / anterior y avance automático
-- [ ] Metadatos (título, artista, carátula) en la notificación
-- [ ] Carátulas de álbum en la lista y el mini-reproductor
-- [ ] Barra de progreso con *seek*
-- [ ] `ViewModel` obtenido con `viewModels()` para sobrevivir a la rotación
-- [ ] Permiso `POST_NOTIFICATIONS` también en Android 13 (API 33)
-- [ ] Pantallas de álbumes y artistas, búsqueda y favoritos
+- [x] **Cola de reproducción**: siguiente / anterior y avance automático
+- [x] Metadatos (título, artista, carátula) en la notificación
+- [x] Carátulas de álbum en la lista y el mini-reproductor
+- [x] Barra de progreso con *seek*
+- [x] `ViewModel` obtenido con `viewModels()` para sobrevivir a la rotación
+- [x] Permiso `POST_NOTIFICATIONS` también en Android 13 (API 33)
+- [x] Pantallas de álbumes y artistas, búsqueda y favoritos
 - [ ] Ecualizador y ajustes
 
 ## 📄 Licencia
